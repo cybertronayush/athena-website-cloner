@@ -4,117 +4,230 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ---------------------------------------------------------------------------
+   Bending Spoons design system
+   Every value below is measured from https://www.bendingspoons.com/ via
+   getComputedStyle() and cross-checked against docs/research/tokens.lock.json.
+   oklch values are exact conversions of the measured rgb()/oklab() values.
+--------------------------------------------------------------------------- */
+
 @theme inline {
+  /* Type families -------------------------------------------------------- */
+  --font-sans:
+    var(--font-instrument-sans), -apple-system, "system-ui", "Segoe UI", Roboto,
+    "Helvetica Neue", "Noto Sans", Arial, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-serif: var(--font-instrument-serif), Times, "Times New Roman", serif;
+  --font-mono:
+    var(--font-fragment-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-heading: var(--font-sans);
+
+  /* Display type scale (measured headline sizes) -------------------------- */
+  --text-display-xs: 42px;
+  --text-display-xs--line-height: 1;
+  --text-display-sm: 50px;
+  --text-display-sm--line-height: 1;
+  --text-display: 64px;
+  --text-display--line-height: 1;
+  --text-display-lg: 100px;
+  --text-display-lg--line-height: 1;
+  --text-display-xl: 125px;
+  --text-display-xl--line-height: 1;
+  --text-display-2xl: 145px;
+  --text-display-2xl--line-height: 1;
+  --text-display-3xl: 185px;
+  --text-display-3xl--line-height: 1;
+
+  /* Tracking. h1 measures 100px/-6px => -0.06em. ------------------------- */
+  --tracking-display: -0.06em;
+  --tracking-heading: -0.04em;
+  --tracking-tight-sm: -0.02em;
+
+  /* Semantic colors ------------------------------------------------------ */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
-  --font-heading: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Brand + site-specific colors ----------------------------------------- */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-foreground-dim: var(--foreground-dim);
+  --color-foreground-subtle: var(--foreground-subtle);
+  --color-foreground-65: var(--foreground-65);
+  --color-foreground-50: var(--foreground-50);
+  --color-foreground-30: var(--foreground-30);
+  --color-surface-raised: var(--surface-raised);
+  --color-overlay: var(--overlay);
+  --color-overlay-strong: var(--overlay-strong);
+  --color-border-strong: var(--border-strong);
+  --color-link: var(--link);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Radii (measured ladder: 2, 3, 20, 32, 40, 50, 100, full) ------------- */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 20px;
+  --radius-lg: 32px;
+  --radius-xl: 40px;
+  --radius-2xl: 50px;
+  --radius-3xl: 100px;
+  --radius-4xl: 100px;
+
+  /* Shadows (measured) --------------------------------------------------- */
+  --shadow-bleed: 0 100px 100px -100px rgb(0 0 0);
+  /* Exact transcription of the measured shadow. See DEGRADATIONS.md.
+     @clone-degraded: measured in the shadows bucket (count 2); token-lint checks
+     CSS color literals against the colors bucket only, so it cannot resolve there */
+  --shadow-card: 0 4px 8px 0 rgb(0 0 0 / 0.2);
+
+  /* Nav blur (measured backdrop-filter: blur(16px)) ---------------------- */
+  --blur-nav: 16px;
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Core surface + text -------------------------------------------------- */
+  --background: oklch(0 0 0); /* rgb(0, 0, 0) */
+  --foreground: oklch(1 0 0); /* rgb(255, 255, 255) */
+
+  /* Brand accent: rgb(199, 255, 159) lime ------------------------------- */
+  --brand: oklch(0.9397 0.1361 133.09);
+  --brand-foreground: oklch(0 0 0);
+
+  --primary: oklch(0.9397 0.1361 133.09);
+  --primary-foreground: oklch(0 0 0);
+
+  /* Panels. Measured overlay blacks sitting on the black page. ---------- */
+  --card: oklch(0 0 0 / 0.3); /* oklab(0 0 0 / 0.3) */
+  --card-foreground: oklch(1 0 0);
+  --popover: oklch(0 0 0 / 0.75); /* oklab(0 0 0 / 0.75) */
+  --popover-foreground: oklch(1 0 0);
+  --surface-raised: oklch(0 0 0 / 0.1); /* nav panel */
+  --overlay: oklch(0 0 0 / 0.3);
+  --overlay-strong: oklch(0 0 0 / 0.75);
+
+  /* Low-emphasis surfaces. The site only ever uses white @ 5% for UI chrome
+     (the other measured white alphas — 0.3 / 0.5 / 0.65 — are text and rule
+     weights, see the text ramp below). ---------------------------------- */
+  --secondary: oklch(1 0 0 / 0.05);
+  --secondary-foreground: oklch(1 0 0);
+  --muted: oklch(1 0 0 / 0.05);
+  --muted-foreground: oklch(0.5208 0 0); /* rgb(105, 105, 105) */
+  --accent: oklch(1 0 0 / 0.05);
+  --accent-foreground: oklch(1 0 0);
+
+  /* Text ramp ------------------------------------------------------------ */
+  --foreground-dim: oklch(0.5658 0 0); /* rgb(118, 118, 118) */
+  --foreground-subtle: oklch(0.4495 0 0); /* rgb(85, 85, 85) */
+  --foreground-65: oklch(1 0 0 / 0.65);
+  --foreground-50: oklch(1 0 0 / 0.5);
+  --foreground-30: oklch(1 0 0 / 0.3);
+
+  /* Lines ---------------------------------------------------------------- */
+  --border: oklch(1 0 0 / 0.05); /* nav border, white @ 5% */
+  --border-strong: oklch(1 0 0 / 0.3);
+  --input: oklch(1 0 0 / 0.05);
+  --ring: oklch(0.9397 0.1361 133.09);
+
+  --link: oklch(0.5119 0.1546 264.29); /* rgb(56, 96, 190) */
+  /* @clone-degraded: shadcn scaffold default kept — no error/destructive UI state
+     visible on the live site to measure a real value from */
+  --destructive: oklch(0.704 0.191 22.216);
+
+  --chart-1: oklch(0.9397 0.1361 133.09); /* brand lime */
+  --chart-2: oklch(0.5119 0.1546 264.29); /* rgb(56, 96, 190) */
+  --chart-3: oklch(0.8975 0 0); /* rgb(221, 221, 221) */
+  --chart-4: oklch(0.5658 0 0); /* rgb(118, 118, 118) */
+  --chart-5: oklch(0.4495 0 0); /* rgb(85, 85, 85) */
+
+  --radius: 32px;
+
+  --sidebar: oklch(0 0 0);
+  --sidebar-foreground: oklch(1 0 0);
+  --sidebar-primary: oklch(0.9397 0.1361 133.09);
+  --sidebar-primary-foreground: oklch(0 0 0);
+  --sidebar-accent: oklch(1 0 0 / 0.05);
+  --sidebar-accent-foreground: oklch(1 0 0);
+  --sidebar-border: oklch(1 0 0 / 0.05);
+  --sidebar-ring: oklch(0.9397 0.1361 133.09);
 }
 
+/* The site ships dark-only. `.dark` mirrors `:root` so shadcn `dark:`
+   variants resolve to the same measured palette. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0 0 0);
+  --foreground: oklch(1 0 0);
+  --brand: oklch(0.9397 0.1361 133.09);
+  --brand-foreground: oklch(0 0 0);
+  --primary: oklch(0.9397 0.1361 133.09);
+  --primary-foreground: oklch(0 0 0);
+  --card: oklch(0 0 0 / 0.3);
+  --card-foreground: oklch(1 0 0);
+  --popover: oklch(0 0 0 / 0.75);
+  --popover-foreground: oklch(1 0 0);
+  --surface-raised: oklch(0 0 0 / 0.1);
+  --overlay: oklch(0 0 0 / 0.3);
+  --overlay-strong: oklch(0 0 0 / 0.75);
+  --secondary: oklch(1 0 0 / 0.05);
+  --secondary-foreground: oklch(1 0 0);
+  --muted: oklch(1 0 0 / 0.05);
+  --muted-foreground: oklch(0.5208 0 0);
+  --accent: oklch(1 0 0 / 0.05);
+  --accent-foreground: oklch(1 0 0);
+  --foreground-dim: oklch(0.5658 0 0);
+  --foreground-subtle: oklch(0.4495 0 0);
+  --foreground-65: oklch(1 0 0 / 0.65);
+  --foreground-50: oklch(1 0 0 / 0.5);
+  --foreground-30: oklch(1 0 0 / 0.3);
+  --border: oklch(1 0 0 / 0.05);
+  --border-strong: oklch(1 0 0 / 0.3);
+  --input: oklch(1 0 0 / 0.05);
+  --ring: oklch(0.9397 0.1361 133.09);
+  --link: oklch(0.5119 0.1546 264.29);
+  /* @clone-degraded: shadcn scaffold default kept — no error/destructive UI state
+     visible on the live site to measure a real value from */
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.9397 0.1361 133.09);
+  --chart-2: oklch(0.5119 0.1546 264.29);
+  --chart-3: oklch(0.8975 0 0);
+  --chart-4: oklch(0.5658 0 0);
+  --chart-5: oklch(0.4495 0 0);
+  --sidebar: oklch(0 0 0);
+  --sidebar-foreground: oklch(1 0 0);
+  --sidebar-primary: oklch(0.9397 0.1361 133.09);
+  --sidebar-primary-foreground: oklch(0 0 0);
+  --sidebar-accent: oklch(1 0 0 / 0.05);
+  --sidebar-accent-foreground: oklch(1 0 0);
+  --sidebar-border: oklch(1 0 0 / 0.05);
+  --sidebar-ring: oklch(0.9397 0.1361 133.09);
 }
 
 @layer base {
@@ -126,5 +239,12 @@
   }
   html {
     @apply font-sans;
+    background-color: var(--background);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background-color: var(--brand);
+    color: var(--brand-foreground);
   }
 }

@@ -1,0 +1,12 @@
+{
+  "runtime": {},
+  "signature_slots": {
+    "magnetic-cursor": 1,
+    "pinned-scroll-section": 1
+  },
+  "shared_files": [
+    "src/app/globals.css",
+    "src/app/layout.tsx",
+    "src/app/page.tsx"
+  ]
+}
