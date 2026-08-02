@@ -1,10 +1,10 @@
-# madmethod Website Cloner
+# Athena
 
-A general-purpose pipeline that turns any live website into a clean, modern Next.js codebase.
+Athena is a general-purpose pipeline that turns any live website into a clean, modern Next.js codebase.
 
 Point it at a URL. It drives a real headless browser over the target, extracts exact computed CSS, real assets and actual interaction behavior, locks the design vocabulary it measured, then builds the site back section by section with parallel agents that cannot silently drift from the measurements or clobber each other's work.
 
-This is madmethod.io's internal tool, being open-sourced. It is not tied to any one target site.
+Athena is madmethod.io's internal tool, being open-sourced. It is not tied to any one target site.
 
 ## What it actually does
 
@@ -174,12 +174,6 @@ The shared-file lock is same-UID POSIX. It stops normal edits and common bypasse
 
 Clone only sites you are authorized to replicate. Logos, brand assets and copy belong to their owners.
 
-## Credit and lineage
-
-This started from [`ai-website-cloner-template`](https://github.com/JCodesMore/ai-website-cloner-template) by JCodesMore (MIT), which provided the original scaffold and the shape of the clone pipeline. madmethod.io then extended it substantially: the token-lock and containment linter with real color-space math, the shared-file protection stack (POSIX lock, canary, tripwire, verifier), fragment-based codegen, the claims ledger for parallel dispatch coordination, and motion-aware extraction. Those additions are what the sections above describe.
-
-Original and derivative work are both MIT. See [LICENSE](LICENSE).
-
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
