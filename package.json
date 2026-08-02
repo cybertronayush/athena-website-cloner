@@ -1,5 +1,5 @@
 {
-  "name": "athena-website-cloner",
+  "name": "sersi-website-cloner",
   "version": "0.3.1",
   "private": true,
   "description": "An AI-agent pipeline that reverse-engineers any website into a pixel-perfect Next.js 16 codebase, extracting design tokens, components, and assets.",
