@@ -1,10 +1,10 @@
-# Sersi
+# Athena
 
-Sersi is a general-purpose pipeline that turns any live website into a clean, modern Next.js codebase.
+Athena is a general-purpose pipeline that turns any live website into a clean, modern Next.js codebase.
 
 Point it at a URL. It drives a real headless browser over the target, extracts exact computed CSS, real assets and actual interaction behavior, locks the design vocabulary it measured, then builds the site back section by section with parallel agents that cannot silently drift from the measurements or clobber each other's work.
 
-Sersi is madmethod.io's internal tool, being open-sourced. It is not tied to any one target site.
+Athena is madmethod.io's internal tool, being open-sourced. It is not tied to any one target site.
 
 ## What it actually does
 
