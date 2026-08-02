@@ -2,6 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* BEGIN GENERATED SECTION IMPORTS */
+/* END GENERATED SECTION IMPORTS */
+
 @custom-variant dark (&:is(.dark *));
 
 /* ---------------------------------------------------------------------------
@@ -23,6 +26,8 @@
   --font-heading: var(--font-sans);
 
   /* Display type scale (measured headline sizes) -------------------------- */
+  --text-display-mobile: 45px; /* real mobile h1 fontSize, verified live */
+  --text-display-mobile--line-height: 1;
   --text-display-xs: 42px;
   --text-display-xs--line-height: 1;
   --text-display-sm: 50px;
@@ -41,6 +46,7 @@
   /* Tracking. h1 measures 100px/-6px => -0.06em. ------------------------- */
   --tracking-display: -0.06em;
   --tracking-heading: -0.04em;
+  --tracking-display-sm: -0.03em; /* mobile h1 letter-spacing */
   --tracking-tight-sm: -0.02em;
 
   /* Semantic colors ------------------------------------------------------ */
@@ -95,6 +101,9 @@
   /* Radii (measured ladder: 2, 3, 20, 32, 40, 50, 100, full) ------------- */
   --radius-xs: 2px;
   --radius-sm: 3px;
+  /* Sits between sm (3px) and md (20px). Named per the hero builder request so
+     existing rounded-2xs usages resolve, despite reading smaller than it is. */
+  --radius-2xs: 16px;
   --radius-md: 20px;
   --radius-lg: 32px;
   --radius-xl: 40px;
@@ -246,5 +255,34 @@
   ::selection {
     background-color: var(--brand);
     color: var(--brand-foreground);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Page-wide decorative edge fade. Copied byte-for-byte out of the live site
+   stylesheet (not sampled from a screenshot) — it masks the left and right
+   edges of any full-bleed section so overflowing content dissolves into the
+   black page instead of being hard-clipped. Requires a positioned ancestor.
+--------------------------------------------------------------------------- */
+@layer components {
+  .gradient-overlay::before,
+  .gradient-overlay::after {
+    content: "";
+    pointer-events: none;
+    z-index: 1;
+    width: 10vw;
+    height: 110%;
+    position: absolute;
+    top: 0;
+  }
+  .gradient-overlay::before {
+    left: 0;
+    /* @clone-degraded: verbatim gradient ramp from the live site stylesheet. Stop alphas are authored source values; the colors bucket only holds computed element colors, never gradient stops. */
+    background-image: linear-gradient(90deg, #000 0%, #000000bc 19%, #0000008a 34%, #00000061 47%, #00000047 56.5%, #00000031 65%, #00000020 73%, #00000013 80.2%, #0000000b 86.1%, #00000005 91%, #00000002 95.2%, #00000001 98.2%, #0000 100%);
+  }
+  .gradient-overlay::after {
+    right: 0;
+    /* @clone-degraded: verbatim gradient ramp from the live site stylesheet. Stop alphas are authored source values; the colors bucket only holds computed element colors, never gradient stops. */
+    background-image: linear-gradient(270deg, #000 0%, #000000bc 19%, #0000008a 34%, #00000061 47%, #00000047 56.5%, #00000031 65%, #00000020 73%, #00000013 80.2%, #0000000b 86.1%, #00000005 91%, #00000002 95.2%, #00000001 98.2%, #0000 100%);
   }
 }
