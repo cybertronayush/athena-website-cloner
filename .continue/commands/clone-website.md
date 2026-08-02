@@ -9,467 +9,322 @@ invokable: true
 
 # Clone Website
 
-You are about to reverse-engineer and rebuild **$ARGUMENTS** as pixel-perfect clones.
+You reverse-engineer and rebuild the target URL(s) the user provided as pixel-perfect clones, into a Next.js 16 + React 19 + shadcn/ui + Tailwind v4 scaffold.
 
-When multiple URLs are provided, process them independently and in parallel where possible, while keeping each site's extraction artifacts isolated in dedicated folders (for example, `docs/research/<hostname>/`).
+This is NOT a two-phase "inspect then build". You are a **foreman walking the job site** — as you inspect each section you write a detailed spec file, then hand that file to a builder subagent with everything it needs. Extraction is meticulous and produces auditable artifacts; construction runs in parallel.
 
-This is not a two-phase process (inspect then build). You are a **foreman walking the job site** — as you inspect each section of the page, you write a detailed specification to a file, then hand that file to a specialist builder agent with everything they need. Extraction and construction happen in parallel, but extraction is meticulous and produces auditable artifacts.
+When multiple URLs are given, process them with isolated artifacts per site (e.g. `docs/research/<hostname>/`).
+
+## Toolchain (read first)
+
+Browser automation is **mandatory** and is provided by a bundled Playwright helper — there is no browser-MCP dependency. Resolve `H` (the skill's own directory) once, then drive everything through it:
+
+```bash
+# Resolve skill dir: explicit override wins, then the repo-vendored copy (a cloned repo
+# ships its own .claude/skills/clone-website, so it stays self-contained), then a global
+# install. Claude Code also exposes ${CLAUDE_SKILL_DIR} for the currently-invoked skill.
+H="${CLONE_WEBSITE_SKILL_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/skills/clone-website}"
+[ -d "$H/scripts" ] || H="${CLAUDE_SKILL_DIR:-$HOME/.config/opencode/skills/clone-website}"
+[ -d "$H/scripts" ] || H="$HOME/.claude/skills/clone-website"
+[ -d "$H/scripts" ] || { echo "clone-website skill not found. Set CLONE_WEBSITE_SKILL_DIR to its path." >&2; }
+
+# screenshots (master refs + per-section + QA). --full = full page; --mobile = 390px.
+node "$H/scripts/inspect.mjs" screenshot <url> <out.png> [--full] [--width 1440|--mobile] [--scroll Y] [--hover SEL] [--click SEL]
+# exact computed-style DOM walk for ONE selector (the heart of extraction)
+node "$H/scripts/inspect.mjs" extract <url> "<css-selector>" [--width 1440|--mobile] [--scroll Y] [--hover SEL] [--click SEL]
+# frozen six-bucket vocabulary (colors, spacing, radii, fonts, shadows, fontSizes) — pipe to docs/research/tokens.lock.json
+# --responsive scans desktop AND mobile in one call and merges them; always use it for the lock
+node "$H/scripts/inspect.mjs" tokens <url> [--responsive] [--width 1440|--mobile] [--min-count N] [--top N]
+# enumerate every image / video / background-image / font / favicon on the page
+node "$H/scripts/inspect.mjs" assets <url> [--mobile]
+# download every discovered asset into a folder (batched, deduped)
+node "$H/scripts/inspect.mjs" download <url> public/images
+# map top-level sections, boxes, z-index, headings — your page topology starter
+node "$H/scripts/inspect.mjs" topology <url> [--mobile]
+# "is this element moving on its own?" — one load, long observation window, samples transform/opacity/backgroundPosition
+node "$H/scripts/inspect.mjs" motion-check <url> "<css-selector>" [--duration 8000] [--samples 5] [--props a,b,c]
+```
+
+**Multi-state extraction = two calls, then diff.** To capture a scroll/hover/click state, run `extract` (or `screenshot`) once in the default state and again with `--scroll Y` / `--hover SEL` / `--click SEL`. The diff between the two outputs IS the behavior spec. Use `--wait MS` to let animations settle. This two-call diff is for *triggered* states only — for self-driven, continuous motion use `motion-check`, never two `extract --wait` calls (see the Motion sweep in Phase 1).
+
+If `inspect.mjs` fails because Playwright/Chromium is missing, run once: `cd "$H/scripts" && npm install && npx playwright install chromium`.
 
 ## Scope Defaults
 
-The target is whatever page `$ARGUMENTS` resolves to. Clone exactly what's visible at that URL. Unless the user specifies otherwise, use these defaults:
-
-- **Fidelity level:** Pixel-perfect — exact match in colors, spacing, typography, animations
-- **In scope:** Visual layout and styling, component structure and interactions, responsive design, mock data for demo purposes
-- **Out of scope:** Real backend / database, authentication, real-time features, SEO optimization, accessibility audit
-- **Customization:** None — pure emulation
-
-If the user provides additional instructions (specific fidelity level, customizations, extra context), honor those over the defaults.
+Clone exactly what's visible at the URL. Unless the user says otherwise:
+- **Fidelity:** Pixel-perfect — exact colors, spacing, typography, animations
+- **In scope:** Visual layout/styling, component structure, interactions, responsive design, mock data for demos
+- **Out of scope:** Real backend/database, auth, real-time features, SEO, a11y audit
+- **Customization:** None — pure emulation. Honor any user overrides.
 
 ## Pre-Flight
 
-1. **Browser automation is required.** Check for available browser MCP tools (Chrome MCP, Playwright MCP, Browserbase MCP, Puppeteer MCP, etc.). Use whichever is available — if multiple exist, prefer Chrome MCP. If none are detected, ask the user which browser tool they have and how to connect it. This skill cannot work without browser automation.
-2. Parse `$ARGUMENTS` as one or more URLs. Normalize and validate each URL; if any are invalid, ask the user to correct them before proceeding. For each valid URL, verify it is accessible via your browser MCP tool.
-3. Verify the base project builds: `npm run build`. The Next.js + shadcn/ui + Tailwind v4 scaffold should already be in place. If not, tell the user to set it up first.
-4. Create the output directories if they don't exist: `docs/research/`, `docs/research/components/`, `docs/design-references/`, `scripts/`. For multiple clones, also prepare per-site folders like `docs/research/<hostname>/` and `docs/design-references/<hostname>/`.
-5. When working with multiple sites in one command, optionally confirm whether to run them in parallel (recommended, if resources allow) or sequentially to avoid overload.
+1. **Scaffold check / bootstrap.** If the current working directory is NOT already this cloner scaffold (no `package.json` depending on `next` + `src/app/`), bootstrap one:
+   ```bash
+   cp -R "$H/scaffold/." <target-dir>
+   cd <target-dir> && npm install
+   ```
+   Ask the user for the target directory name if it's ambiguous. If a scaffold is already present, use it in place.
+2. **Verify this is a git repository** (`git rev-parse --is-inside-work-tree`). If not, `git init && git add -A && git commit -m 'chore: baseline before clone'` — the tripwire mechanism below requires git history to diff against.
+3. **Verify the helper works:** `node "$H/scripts/inspect.mjs" topology <url>` should return JSON. If it errors on Playwright, run the install line above.
+4. **Validate URLs.** Normalize each; confirm each loads (the `topology` call above doubles as a reachability check). If a site blocks headless browsers (Cloudflare/anti-bot), tell the user — it may be uncloneable.
+5. **Verify the base builds:** `npm run build`. Fix before proceeding. (Node ≥ 24 is recommended by the scaffold; if the build complains about Node version, tell the user to upgrade or `nvm use`.)
+6. **Create output dirs:** `docs/research/`, `docs/research/components/`, `docs/design-references/`, `scripts/`. For multiple sites add `docs/research/<hostname>/`.
 
 ## Guiding Principles
 
-These are the truths that separate a successful clone from a "close enough" mess. Internalize them — they should inform every decision you make.
+Internalize these — they inform every decision.
 
 ### 1. Completeness Beats Speed
-
-Every builder agent must receive **everything** it needs to do its job perfectly: screenshot, exact CSS values, downloaded assets with local paths, real text content, component structure. If a builder has to guess anything — a color, a font size, a padding value — you have failed at extraction. Take the extra minute to extract one more property rather than shipping an incomplete brief.
+Every builder must receive **everything**: screenshot, exact CSS values, downloaded assets with local paths, real text, component structure. If a builder has to guess a color/size/padding, extraction failed. Extract one more property rather than ship an incomplete brief.
 
 ### 2. Small Tasks, Perfect Results
-
-When an agent gets "build the entire features section," it glosses over details — it approximates spacing, guesses font sizes, and produces something "close enough" but clearly wrong. When it gets a single focused component with exact CSS values, it nails it every time.
-
-Look at each section and judge its complexity. A simple banner with a heading and a button? One agent. A complex section with 3 different card variants, each with unique hover states and internal layouts? One agent per card variant plus one for the section wrapper. When in doubt, make it smaller.
-
-**Complexity budget rule:** If a builder prompt exceeds ~150 lines of spec content, the section is too complex for one agent. Break it into smaller pieces. This is a mechanical check — don't override it with "but it's all related."
+A builder handed "build the entire features section" approximates and gets it "close enough but wrong". Handed one focused component with exact CSS, it nails it. Judge each section's complexity. Simple banner → one builder. Section with 3 card variants each with unique hover states → one builder per variant plus one wrapper. When in doubt, smaller.
+**Complexity budget:** if a builder spec exceeds ~150 lines, split the section. Mechanical rule — don't override with "but it's all related".
 
 ### 3. Real Content, Real Assets
-
-Extract the actual text, images, videos, and SVGs from the live site. This is a clone, not a mockup. Use `element.textContent`, download every `<img>` and `<video>`, extract inline `<svg>` elements as React components. The only time you generate content is when something is clearly server-generated and unique per session.
-
-**Layered assets matter.** A section that looks like one image is often multiple layers — a background watercolor/gradient, a foreground UI mockup PNG, an overlay icon. Inspect each container's full DOM tree and enumerate ALL `<img>` elements and background images within it, including absolutely-positioned overlays. Missing an overlay image makes the clone look empty even if the background is correct.
+Extract actual text, images, videos, SVGs from the live site (`assets` + `download`). This is a clone, not a mockup. Only generate content that is clearly server-generated/unique per session.
+**Layered assets matter.** A section that looks like one image is often a background + a foreground UI PNG + an overlay icon. Enumerate ALL `<img>` and background-images in each container, including absolutely-positioned overlays. A missed overlay makes the clone look empty.
 
 ### 4. Foundation First
-
-Nothing can be built until the foundation exists: global CSS with the target site's design tokens (colors, fonts, spacing), TypeScript types for the content structures, and global assets (fonts, favicons). This is sequential and non-negotiable. Everything after this can be parallel.
+Nothing builds until the foundation exists: global CSS design tokens (colors, fonts, spacing), TypeScript types, global assets (fonts, favicons). Sequential and non-negotiable. Everything after can be parallel.
 
 ### 5. Extract How It Looks AND How It Behaves
+A website is not a screenshot. Elements move/change/appear on scroll, hover, click, resize, time. For every element extract its **appearance** (exact `getComputedStyle` via the `extract` command) AND its **behavior** (what changes, what triggers it, how it transitions). Not "the nav changes on scroll" — capture styles at `--scroll 0` and `--scroll 400`, diff them, and record the trigger threshold + transition (duration, easing).
+Watch for (illustrative, not exhaustive): scroll-shrinking navbars, viewport-entry animations (fade-up/stagger), `scroll-snap`, parallax, animated hover states, modals/accordions with enter/exit, scroll-driven progress, autoplay carousels, theme transitions, **tab/pill content that cycles**, **scroll-driven tab switching (IntersectionObserver, not clicks)**, **smooth-scroll libs (Lenis/Locomotive — check for `.lenis` class)**.
 
-A website is not a screenshot — it's a living thing. Elements move, change, appear, and disappear in response to scrolling, hovering, clicking, resizing, and time. If you only extract the static CSS of each element, your clone will look right in a screenshot but feel dead when someone actually uses it.
-
-For every element, extract its **appearance** (exact computed CSS via `getComputedStyle()`) AND its **behavior** (what changes, what triggers the change, and how the transition happens). Not "it looks like 16px" — extract the actual computed value. Not "the nav changes on scroll" — document the exact trigger (scroll position, IntersectionObserver threshold, viewport intersection), the before and after states (both sets of CSS values), and the transition (duration, easing, CSS transition vs. JS-driven vs. CSS `animation-timeline`).
-
-Examples of behaviors to watch for — these are illustrative, not exhaustive. The page may do things not on this list, and you must catch those too:
-- A navbar that shrinks, changes background, or gains a shadow after scrolling past a threshold
-- Elements that animate into view when they enter the viewport (fade-up, slide-in, stagger delays)
-- Sections that snap into place on scroll (`scroll-snap-type`)
-- Parallax layers that move at different rates than the scroll
-- Hover states that animate (not just change — the transition duration and easing matter)
-- Dropdowns, modals, accordions with enter/exit animations
-- Scroll-driven progress indicators or opacity transitions
-- Auto-playing carousels or cycling content
-- Dark-to-light (or any theme) transitions between page sections
-- **Tabbed/pill content that cycles** — buttons that switch visible card sets with transitions
-- **Scroll-driven tab/accordion switching** — sidebars where the active item auto-changes as content scrolls past (IntersectionObserver, NOT click handlers)
-- **Smooth scroll libraries** (Lenis, Locomotive Scroll) — check for `.lenis` class or scroll container wrappers
-
-### 6. Identify the Interaction Model Before Building
-
-This is the single most expensive mistake in cloning: building a click-based UI when the original is scroll-driven, or vice versa. Before writing any builder prompt for an interactive section, you must definitively answer: **Is this section driven by clicks, scrolls, hovers, time, or some combination?**
-
-How to determine this:
-1. **Don't click first.** Scroll through the section slowly and observe if things change on their own as you scroll.
-2. If they do, it's scroll-driven. Extract the mechanism: `IntersectionObserver`, `scroll-snap`, `position: sticky`, `animation-timeline`, or JS scroll listeners.
-3. If nothing changes on scroll, THEN click/hover to test for click/hover-driven interactivity.
-4. Document the interaction model explicitly in the component spec: "INTERACTION MODEL: scroll-driven with IntersectionObserver" or "INTERACTION MODEL: click-to-switch with opacity transition."
-
-A section with a sticky sidebar and scrolling content panels is fundamentally different from a tabbed interface where clicking switches content. Getting this wrong means a complete rewrite, not a CSS tweak.
+### 6. Identify the Interaction Model BEFORE Building
+The single most expensive mistake: building click-based UI when the original is scroll-driven (or vice versa). Before any builder spec for an interactive section, definitively answer: clicks, scrolls, hovers, time, or a combination?
+1. **Don't click first.** `screenshot` at increasing `--scroll` values and watch what changes on its own.
+2. If things change on scroll → scroll-driven. Extract the mechanism (IntersectionObserver, scroll-snap, sticky, animation-timeline, JS listeners).
+3. If nothing changes on scroll → THEN test `--click`/`--hover`.
+4. Document explicitly in the spec: e.g. "INTERACTION MODEL: scroll-driven with IntersectionObserver".
 
 ### 7. Extract Every State, Not Just the Default
-
-Many components have multiple visual states — a tab bar shows different cards per tab, a header looks different at scroll position 0 vs 100, a card has hover effects. You must extract ALL states, not just whatever is visible on page load.
-
-For tabbed/stateful content:
-- Click each tab/button via browser MCP
-- Extract the content, images, and card data for EACH state
-- Record which content belongs to which state
-- Note the transition animation between states (opacity, slide, fade, etc.)
-
-For scroll-dependent elements:
-- Capture computed styles at scroll position 0 (initial state)
-- Scroll past the trigger threshold and capture computed styles again (scrolled state)
-- Diff the two to identify exactly which CSS properties change
-- Record the transition CSS (duration, easing, properties)
-- Record the exact trigger threshold (scroll position in px, or viewport intersection ratio)
+Tab bars show different cards per tab; headers differ at scroll 0 vs 100; cards have hover effects. Capture ALL states.
+- Tabbed/stateful: `extract --click <each tab selector>` and record content + styles per state, plus the transition.
+- Scroll-dependent: `extract --scroll 0` then `extract --scroll <past threshold>`, diff, record trigger px + transition.
 
 ### 8. Spec Files Are the Source of Truth
-
-Every component gets a specification file in `docs/research/components/` BEFORE any builder is dispatched. This file is the contract between your extraction work and the builder agent. The builder receives the spec file contents inline in its prompt — the file also persists as an auditable artifact that the user (or you) can review if something looks wrong.
-
-The spec file is not optional. It is not a nice-to-have. If you dispatch a builder without first writing a spec file, you are shipping incomplete instructions based on whatever you can remember from a browser MCP session, and the builder will guess to fill gaps.
+Every component gets a spec in `docs/research/components/<name>.spec.md` BEFORE any builder is dispatched. The builder receives the spec contents **inline** in its prompt; the file persists as an auditable artifact. No spec = the builder guesses from memory. Non-negotiable.
 
 ### 9. Build Must Always Compile
-
-Every builder agent must verify `npx tsc --noEmit` passes before finishing. After merging worktrees, you verify `npm run build` passes. A broken build is never acceptable, even temporarily.
+Every builder verifies `npx tsc --noEmit` before finishing. After reconciling, you verify `npm run build`. A broken build is never acceptable, even temporarily.
 
 ## Phase 1: Reconnaissance
 
-Navigate to the target URL with browser MCP.
-
 ### Screenshots
-- Take **full-page screenshots** at desktop (1440px) and mobile (390px) viewports
-- Save to `docs/design-references/` with descriptive names
-- These are your master reference — builders will receive section-specific crops/screenshots later
+- Full-page master refs at desktop and mobile:
+  `inspect.mjs screenshot <url> docs/design-references/<host>-desktop.png --full`
+  `inspect.mjs screenshot <url> docs/design-references/<host>-mobile.png --full --mobile`
 
 ### Global Extraction
-Extract these from the page before doing anything else:
-
-**Fonts** — Inspect `<link>` tags for Google Fonts or self-hosted fonts. Check computed `font-family` on key elements (headings, body, code, labels). Document every family, weight, and style actually used. Configure them in `src/app/layout.tsx` using `next/font/google` or `next/font/local`.
-
-**Colors** — Extract the site's color palette from computed styles across the page. Update `src/app/globals.css` with the target's actual colors in the `:root` and `.dark` CSS variable blocks. Map them to shadcn's token names (background, foreground, primary, muted, etc.) where they fit. Add custom properties for colors that don't map to shadcn tokens.
-
-**Favicons & Meta** — Download favicons, apple-touch-icons, OG images, webmanifest to `public/seo/`. Update `layout.tsx` metadata.
-
-**Global UI patterns** — Identify any site-wide CSS or JS: custom scrollbar hiding, scroll-snap on the page container, global keyframe animations, backdrop filters, gradients used as overlays, **smooth scroll libraries** (Lenis, Locomotive Scroll — check for `.lenis`, `.locomotive-scroll`, or custom scroll container classes). Add these to `globals.css` and note any libraries that need to be installed.
+- **Fonts** — `extract` key elements (h1, body, code, labels) and read `fontFamily`/weights. Configure in `src/app/layout.tsx` via `next/font`.
+- **Colors** — pull the palette from `extract` across the page; write the target's real colors into `:root`/`.dark` in `src/app/globals.css`, mapped to shadcn tokens where they fit.
+- **Favicons & meta** — `assets` lists favicons/manifest; `download` them to `public/seo/`; update `layout.tsx` metadata.
+- **Global patterns** — scrollbar hiding, scroll-snap on the container, global keyframes, backdrop filters, overlay gradients, **smooth-scroll libs**. Add to `globals.css`; note libs to install.
 
 ### Mandatory Interaction Sweep
-
-This is a dedicated pass AFTER screenshots and BEFORE anything else. Its purpose is to discover every behavior on the page — many of which are invisible in a static screenshot.
-
-**Scroll sweep:** Scroll the page slowly from top to bottom via browser MCP. At each section, pause and observe:
-- Does the header change appearance? Record the scroll position where it triggers.
-- Do elements animate into view? Record which ones and the animation type.
-- Does a sidebar or tab indicator auto-switch as you scroll? Record the mechanism.
-- Are there scroll-snap points? Record which containers.
-- Is there a smooth scroll library active? Check for non-native scroll behavior.
-
-**Click sweep:** Click every element that looks interactive:
-- Every button, tab, pill, link, card
-- Record what happens: does content change? Does a modal open? Does a dropdown appear?
-- For tabs/pills: click EACH ONE and record the content that appears for each state
-
-**Hover sweep:** Hover over every element that might have hover states:
-- Buttons, cards, links, images, nav items
-- Record what changes: color, scale, shadow, underline, opacity
-
-**Responsive sweep:** Test at 3 viewport widths via browser MCP:
-- Desktop: 1440px
-- Tablet: 768px
-- Mobile: 390px
-- At each width, note which sections change layout (column → stack, sidebar disappears, etc.) and at approximately which breakpoint the change occurs.
-
-Save all findings to `docs/research/BEHAVIORS.md`. This is your behavior bible — reference it when writing every component spec.
+A dedicated pass after screenshots, before building — most behaviors are invisible in a static shot.
+- **Scroll sweep:** `screenshot` at several `--scroll` offsets top→bottom. Note header changes (+ trigger px), viewport-entry animations, auto-switching sidebars/tabs, scroll-snap, non-native scrolling.
+- **Motion sweep (time-driven / self-animating):** `node "$H/scripts/inspect.mjs" motion-check <url> "<selector>" [--duration 8000] [--samples 5]`. This is the only correct way to answer "is this element moving on its own, with no interaction?" One page load, a generous settle for JS to boot, then N evenly-spaced samples of `transform`/`opacity`/`backgroundPosition` across a long observation window (default 5 samples over 8s), reporting `animating: true/false` plus which properties changed. **Do not** answer this by comparing two separate `extract --wait X` calls — that technique has a demonstrated blind spot for slow-starting animations (gated behind hydration, video preload, or lazy JS): both short-wait loads can land before the loop starts, and a genuinely-rotating carousel reads as byte-identical and gets recorded as static. Run `motion-check` on anything that could plausibly be a carousel, marquee, ticker, or decorative background motion, and record the result in BEHAVIORS.md.
+- **Click sweep:** `extract --click` every button/tab/pill/card; record what changes and per-state content.
+- **Hover sweep:** `extract --hover` buttons/cards/links/nav; record color/scale/shadow/opacity changes + transition.
+- **Responsive sweep:** capture at `--width 1440`, `--width 768`, and `--mobile` (390); note where each section reflows.
+Save findings to `docs/research/BEHAVIORS.md` — your behavior bible.
 
 ### Page Topology
-Map out every distinct section of the page from top to bottom. Give each a working name. Document:
-- Their visual order
-- Which are fixed/sticky overlays vs. flow content
-- The overall page layout (scroll container, column structure, z-index layers)
-- Dependencies between sections (e.g., a floating nav that overlays everything)
-- **The interaction model** of each section (static, click-driven, scroll-driven, time-driven)
-
-Save this as `docs/research/PAGE_TOPOLOGY.md` — it becomes your assembly blueprint.
+Start from `inspect.mjs topology <url>`, then refine by hand. Document section order, fixed/sticky overlays vs flow content, the page layout (scroll container, columns, z-index layers), inter-section dependencies, and each section's interaction model. Save as `docs/research/PAGE_TOPOLOGY.md` — your assembly blueprint.
 
 ## Phase 2: Foundation Build
 
-This is sequential. Do it yourself (not delegated to an agent) since it touches many files:
+Sequential; do it yourself (touches many files):
+1. **Fonts** in `layout.tsx` to match the target.
+2. **`globals.css`** — target color tokens, spacing, keyframes, utility classes, global scroll behavior (Lenis/scroll-snap).
+3. **TypeScript interfaces** in `src/types/` for observed content structures.
+4. **SVG icons** — find inline `<svg>`s, dedupe, save each icon as its own file in `src/components/icons/<IconName>.tsx`, one named export per file (e.g. `src/components/icons/SearchIcon.tsx` exporting `SearchIcon`). `src/components/icons/index.ts` is a GENERATED barrel (via `codegen.mjs`), never hand-edited. Do not create `src/components/icons.tsx` — a single-file barrel at that path wins module resolution over the `icons/` directory and silently breaks every `@/components/icons` import (`TS2305: has no exported member`). If the scaffold still ships one, delete it.
+5. **Download global assets** — `inspect.mjs download <url> public/images` (and `public/videos`, `public/seo` as needed). Preserve meaningful structure.
+6. **Token lock** — generate it: `node "$H/scripts/inspect.mjs" tokens <url> --responsive > docs/research/tokens.lock.json`. This freezes the target's real color/spacing/radius/font/shadow/fontSizes vocabulary — every builder's generated literals must come from this vocabulary from here on (see token-lint below). **Always pass `--responsive`:** it scans desktop and mobile in one invocation and merges the buckets before curation. A desktop-only lock is an incomplete lock — values that exist only at mobile widths (a mobile-only font size, a mobile-only gap) are simply absent from it, so a builder who implements them correctly later gets flagged for a "violation" that is really a hole in the lock. Confirmed on real sites. It costs roughly 2x the wall-clock time of a single-viewport scan; pay it, lock correctness is worth more than a minute.
+7. **Reconcile `globals.css` against the token lock, now, while you still have direct edit access.** Run `node "$H/scripts/token-lint.mjs" docs/research/tokens.lock.json src/app/globals.css`. For every violation: either update the CSS custom property to the target's real value, or — if it's a shadcn structural default this specific clone genuinely doesn't use (e.g. an unused chart color slot) — mark it with a CSS comment `/* @clone-degraded: <reason> */` on the line above and log a row in `docs/research/DEGRADATIONS.md`. Resolve every violation before moving on — builders dispatched in Phase 3 cannot edit this file directly (see Shared-Scope Contract), so anything left unresolved here becomes permanently unfixable later in the pipeline. A fresh, unmodified scaffold typically produces around 60 violations here (shadcn's default color slots) — that is the expected starting count, not a broken lock; work through them via Fix or `@clone-degraded`, don't second-guess the tool.
+8. **Runtime claims ledger** — seed `docs/research/.runtime-claims.json`, written by you (the orchestrator) only — builders never write this file. `runtime` keys are the shared global infrastructure your Interaction Sweep found; `signature_slots` budgets scarce spectacle interactions; `shared_files` lists files no builder may edit directly. Create it with exactly this structure:
 
-1. **Update fonts** in `layout.tsx` to match the target site's actual fonts
-2. **Update globals.css** with the target's color tokens, spacing values, keyframe animations, utility classes, and any **global scroll behaviors** (Lenis, smooth scroll CSS, scroll-snap on body)
-3. **Create TypeScript interfaces** in `src/types/` for the content structures you've observed
-4. **Extract SVG icons** — find all inline `<svg>` elements on the page, deduplicate them, and save as named React components in `src/components/icons.tsx`. Name them by visual function (e.g., `SearchIcon`, `ArrowRightIcon`, `LogoIcon`).
-5. **Download global assets** — write and run a Node.js script (`scripts/download-assets.mjs`) that downloads all images, videos, and other binary assets from the page to `public/`. Preserve meaningful directory structure.
-6. Verify: `npm run build` passes
-
-### Asset Discovery Script Pattern
-
-Use browser MCP to enumerate all assets on the page:
-
-```javascript
-// Run this via browser MCP to discover all assets
-JSON.stringify({
-  images: [...document.querySelectorAll('img')].map(img => ({
-    src: img.src || img.currentSrc,
-    alt: img.alt,
-    width: img.naturalWidth,
-    height: img.naturalHeight,
-    // Include parent info to detect layered compositions
-    parentClasses: img.parentElement?.className,
-    siblings: img.parentElement ? [...img.parentElement.querySelectorAll('img')].length : 0,
-    position: getComputedStyle(img).position,
-    zIndex: getComputedStyle(img).zIndex
-  })),
-  videos: [...document.querySelectorAll('video')].map(v => ({
-    src: v.src || v.querySelector('source')?.src,
-    poster: v.poster,
-    autoplay: v.autoplay,
-    loop: v.loop,
-    muted: v.muted
-  })),
-  backgroundImages: [...document.querySelectorAll('*')].filter(el => {
-    const bg = getComputedStyle(el).backgroundImage;
-    return bg && bg !== 'none';
-  }).map(el => ({
-    url: getComputedStyle(el).backgroundImage,
-    element: el.tagName + '.' + el.className?.split(' ')[0]
-  })),
-  svgCount: document.querySelectorAll('svg').length,
-  fonts: [...new Set([...document.querySelectorAll('*')].slice(0, 200).map(el => getComputedStyle(el).fontFamily))],
-  favicons: [...document.querySelectorAll('link[rel*="icon"]')].map(l => ({ href: l.href, sizes: l.sizes?.toString() }))
-});
-```
-
-Then write a download script that fetches everything to `public/`. Use batched parallel downloads (4 at a time) with proper error handling.
+   ```json
+   {
+     "runtime": {
+       "lenis": { "status": "planned", "owner": null, "file": null },
+       "webgl-provider": { "status": "planned", "owner": null, "file": null },
+       "page-transition": { "status": "planned", "owner": null, "file": null }
+     },
+     "signature_slots": {
+       "magnetic-cursor": 1,
+       "pinned-scroll-section": 1
+     },
+     "shared_files": [
+       "src/app/globals.css",
+       "src/app/layout.tsx",
+       "src/app/page.tsx"
+     ]
+   }
+   ```
+9. **Run the permission canary:** `bash "$H/scripts/permission-canary.sh" .` — this live-tests the POSIX-lock mechanism itself, not the (inert) OpenCode agent-permission config. If it reports NOT enforced, the pipeline proceeds in paranoid mode — meaning the POSIX lock below is mandatory, not optional. Read `.clone-run/capabilities.json` to confirm (`{"permissions_enforced": bool, "mechanism": "posix-lock", "checked_at": ISO, "detail": string}`).
+10. **Establish the fragment convention:** `src/sections/<name>/` will hold each parallel builder's section component + optional `section.css` + `section.meta.json`, and `src/components/icons/` will hold one file per icon (plus the generated `index.ts` barrel — there is no `src/components/icons.tsx`). `globals.css` and `page.tsx` carry generated marker blocks that `codegen.mjs` will fill in — never hand-edit content between `/* BEGIN GENERATED... */` and `/* END GENERATED... */` markers.
+11. Verify `npm run build`.
+12. **Lock the shared files before parallel dispatch:** `bash "$H/scripts/lock-shared.sh" .` — locks the 3 shared files (`globals.css`, `layout.tsx`, `page.tsx`) via POSIX file+dir permissions. Commit the tree state now (`git add -A && git commit -m 'chore: pre-dispatch baseline'`) — this commit is what `tripwire-check.sh` will diff against.
 
 ## Phase 3: Component Specification & Dispatch
 
-This is the core loop. For each section in your page topology (top to bottom), you do THREE things: **extract**, **write the spec file**, then **dispatch builders**.
+The core loop, per section top→bottom: **extract → write spec → dispatch builder(s) → reconcile.**
 
 ### Step 1: Extract
-
-For each section, use browser MCP to extract everything:
-
-1. **Screenshot** the section in isolation (scroll to it, screenshot the viewport). Save to `docs/design-references/`.
-
-2. **Extract CSS** for every element in the section. Use the extraction script below — don't hand-measure individual properties. Run it once per component container and capture the full output:
-
-```javascript
-// Per-component extraction — run via browser MCP
-// Replace SELECTOR with the actual CSS selector for the component
-(function(selector) {
-  const el = document.querySelector(selector);
-  if (!el) return JSON.stringify({ error: 'Element not found: ' + selector });
-  const props = [
-    'fontSize','fontWeight','fontFamily','lineHeight','letterSpacing','color',
-    'textTransform','textDecoration','backgroundColor','background',
-    'padding','paddingTop','paddingRight','paddingBottom','paddingLeft',
-    'margin','marginTop','marginRight','marginBottom','marginLeft',
-    'width','height','maxWidth','minWidth','maxHeight','minHeight',
-    'display','flexDirection','justifyContent','alignItems','gap',
-    'gridTemplateColumns','gridTemplateRows',
-    'borderRadius','border','borderTop','borderBottom','borderLeft','borderRight',
-    'boxShadow','overflow','overflowX','overflowY',
-    'position','top','right','bottom','left','zIndex',
-    'opacity','transform','transition','cursor',
-    'objectFit','objectPosition','mixBlendMode','filter','backdropFilter',
-    'whiteSpace','textOverflow','WebkitLineClamp'
-  ];
-  function extractStyles(element) {
-    const cs = getComputedStyle(element);
-    const styles = {};
-    props.forEach(p => { const v = cs[p]; if (v && v !== 'none' && v !== 'normal' && v !== 'auto' && v !== '0px' && v !== 'rgba(0, 0, 0, 0)') styles[p] = v; });
-    return styles;
-  }
-  function walk(element, depth) {
-    if (depth > 4) return null;
-    const children = [...element.children];
-    return {
-      tag: element.tagName.toLowerCase(),
-      classes: element.className?.toString().split(' ').slice(0, 5).join(' '),
-      text: element.childNodes.length === 1 && element.childNodes[0].nodeType === 3 ? element.textContent.trim().slice(0, 200) : null,
-      styles: extractStyles(element),
-      images: element.tagName === 'IMG' ? { src: element.src, alt: element.alt, naturalWidth: element.naturalWidth, naturalHeight: element.naturalHeight } : null,
-      childCount: children.length,
-      children: children.slice(0, 20).map(c => walk(c, depth + 1)).filter(Boolean)
-    };
-  }
-  return JSON.stringify(walk(el, 0), null, 2);
-})('SELECTOR');
-```
-
-3. **Extract multi-state styles** — for any element with multiple states (scroll-triggered, hover, active tab), capture BOTH states:
-
-```javascript
-// State A: capture styles at current state (e.g., scroll position 0)
-// Then trigger the state change (scroll, click, hover via browser MCP)
-// State B: re-run the extraction script on the same element
-// The diff between A and B IS the behavior specification
-```
-
-Record the diff explicitly: "Property X changes from VALUE_A to VALUE_B, triggered by TRIGGER, with transition: TRANSITION_CSS."
-
-4. **Extract real content** — all text, alt attributes, aria labels, placeholder text. Use `element.textContent` for each text node. For tabbed/stateful content, **click each tab and extract content per state**.
-
-5. **Identify assets** this section uses — which downloaded images/videos from `public/`, which icon components from `icons.tsx`. Check for **layered images** (multiple `<img>` or background-images stacked in the same container).
-
-6. **Assess complexity** — how many distinct sub-components does this section contain? A distinct sub-component is an element with its own unique styling, structure, and behavior (e.g., a card, a nav item, a search panel).
+1. **Screenshot** the section in isolation (`screenshot --scroll <Y>` to bring it into view) → `docs/design-references/`.
+2. **Extract CSS** for the section container: `inspect.mjs extract <url> "<selector>"`. Capture the full JSON — don't hand-measure.
+3. **Multi-state** — for any stateful element, run `extract` again with `--scroll`/`--click`/`--hover` and record the diff: "Property X: VALUE_A → VALUE_B, trigger TRIGGER, transition TRANSITION".
+4. **Real content** — verbatim text, alt/aria, placeholders; per-state content for tabs (`--click` each).
+5. **Assets** this section uses (from the `assets`/`download` manifest), including layered/overlay images.
+6. **Complexity** — count distinct sub-components (each with own styling/structure/behavior).
 
 ### Step 2: Write the Component Spec File
-
-For each section (or sub-component, if you're breaking it up), create a spec file in `docs/research/components/`. This is NOT optional — every builder must have a corresponding spec file.
-
-**File path:** `docs/research/components/<component-name>.spec.md`
-
-**Template:**
+Create `docs/research/components/<component-name>.spec.md`. Required for every builder. Template:
 
 ```markdown
 # <ComponentName> Specification
-
 ## Overview
-- **Target file:** `src/components/<ComponentName>.tsx`
-- **Screenshot:** `docs/design-references/<screenshot-name>.png`
-- **Interaction model:** <static | click-driven | scroll-driven | time-driven>
-
+- Target file: `src/sections/<section-name>/<ComponentName>.tsx`
+- Screenshot: `docs/design-references/<name>.png`
+- Interaction model: <static | click-driven | scroll-driven | time-driven>
 ## DOM Structure
-<Describe the element hierarchy — what contains what>
-
-## Computed Styles (exact values from getComputedStyle)
-
+<hierarchy — what contains what>
+## Computed Styles (exact getComputedStyle values)
 ### Container
-- display: ...
-- padding: ...
-- maxWidth: ...
-- (every relevant property with exact values)
-
-### <Child element 1>
-- fontSize: ...
-- color: ...
-- (every relevant property)
-
+- <every relevant property with exact values>
 ### <Child element N>
-...
-
+- ...
 ## States & Behaviors
-
-### <Behavior name, e.g., "Scroll-triggered floating mode">
-- **Trigger:** <exact mechanism — scroll position 50px, IntersectionObserver rootMargin "-30% 0px", click on .tab-button, hover>
-- **State A (before):** maxWidth: 100vw, boxShadow: none, borderRadius: 0
-- **State B (after):** maxWidth: 1200px, boxShadow: 0 4px 20px rgba(0,0,0,0.1), borderRadius: 16px
-- **Transition:** transition: all 0.3s ease
-- **Implementation approach:** <CSS transition + scroll listener | IntersectionObserver | CSS animation-timeline | etc.>
-
+### <Behavior name>
+- Trigger: <scroll 50px | IntersectionObserver -30% | click .tab | hover>
+- State A (before): <props>
+- State B (after): <props>
+- Transition: <transition css>
+- Implementation: <CSS transition + listener | IntersectionObserver | animation-timeline>
 ### Hover states
-- **<Element>:** <property>: <before> → <after>, transition: <value>
-
+- <Element>: <prop>: <before> → <after>, transition: <value>
 ## Per-State Content (if applicable)
-
-### State: "Featured"
-- Title: "..."
-- Subtitle: "..."
-- Cards: [{ title, description, image, link }, ...]
-
-### State: "Productivity"
-- Title: "..."
-- Cards: [...]
-
+### State: "<name>"
+- <title/cards/etc.>
 ## Assets
-- Background image: `public/images/<file>.webp`
-- Overlay image: `public/images/<file>.png`
-- Icons used: <ArrowIcon>, <SearchIcon> from icons.tsx
-
+- <local paths from public/> + icons used from `@/components/icons`
 ## Text Content (verbatim)
-<All text content, copy-pasted from the live site>
-
+<copy-pasted from the live site>
 ## Responsive Behavior
-- **Desktop (1440px):** <layout description>
-- **Tablet (768px):** <what changes — e.g., "maintains 2-column, gap reduces to 16px">
-- **Mobile (390px):** <what changes — e.g., "stacks to single column, images full-width">
-- **Breakpoint:** layout switches at ~<N>px
+- Desktop 1440 / Tablet 768 / Mobile 390: <what changes> ; breakpoint ~<N>px
 ```
 
-Fill every section. If a section doesn't apply (e.g., no states for a static footer), write "N/A" — but think twice before marking States & Behaviors as N/A. Even a footer might have hover states on links.
+Fill every section; "N/A" only after thinking twice (even footers have link hovers).
 
-### Step 3: Dispatch Builders
+If a distilled motion lexicon exists at `$H/motion/index.json` (see References — this is an optional, manually-curated Phase 0 asset, not required for every clone), look up the section's interaction-model verb (e.g. `pin-scrub`, `magnetize`, `mask-reveal`) and resolve its token-slots against `docs/research/tokens.lock.json` before writing the spec's `## States & Behaviors` block. This only fills gaps your own `extract`/`--scroll`/`--click` diff can't see (stagger order, overshoot shape, easing between two sampled states) — anything your diff actually measured always overrides the lexicon. Never let a builder see raw reference-repo source; only the resolved numeric/token contract.
 
-Based on complexity, dispatch builder agent(s) in worktree(s):
+### Step 3: Dispatch Builders (opencode Task tool)
+Based on complexity, dispatch builders with the **Task tool** (`subagent_type: "designer"`). opencode subagents share the working tree — **no git worktrees needed.** Dispatch independent builders in parallel (multiple Task calls in one message).
 
-**Simple section** (1-2 sub-components): One builder agent gets the entire section.
+- **Simple section** (1–2 sub-components): one builder for the whole section.
+- **Complex section** (3+ distinct sub-components): one builder per sub-component + one wrapper builder that imports them (sub-components first).
 
-**Complex section** (3+ distinct sub-components): Break it up. One agent per sub-component, plus one agent for the section wrapper that imports them. Sub-component builders go first since the wrapper depends on them.
+**Every builder prompt includes:**
+- The FULL spec file contents inline (never "go read the spec file").
+- The section screenshot path.
+- Which shared things to import (`@/components/icons`, `cn()` from `@/lib/utils`, shadcn primitives in `@/components/ui`).
+- The exact target file path — always inside the builder's own section folder: `src/sections/<section-name>/<ComponentName>.tsx` (e.g. `src/sections/hero/HeroSection.tsx`). The file name is free-form inside that folder; what matters is that it lives under `src/sections/<section-name>/` so codegen can find it. Never `src/components/<ComponentName>.tsx` — a component written there is invisible to codegen, so the section silently never mounts in `page.tsx` and the run looks successful while producing an empty page.
+- Use only assets already in `public/`.
+- A hard rule: any literal color/px/font-family value the component uses must come from `docs/research/tokens.lock.json`'s vocabulary (within ~0.5px tolerance for spacing/radii). If a spec'd pattern is genuinely unsatisfiable under the target's real tokens (e.g. target has one font or near-zero contrast but the pattern assumes a multi-weight type scale), write `@clone-degraded: <reason>` on the line above the literal instead of silently drifting (in CSS files, use a `/* @clone-degraded: <reason> */` comment on the line above instead of the JS/TS line-comment form), and note it for the orchestrator to log in `docs/research/DEGRADATIONS.md` during Reconcile.
+- Its Shared-Scope Contract, rendered from `.runtime-claims.json`: which global infra is already installed (import it — e.g. `useLenis()` — never recreate a second provider), which signature slots are already claimed (don't reach for a magnetic-cursor or pinned-scroll pattern if the budget is spent), and an explicit rule that it may NOT edit any of the 3 protected shared files — `src/app/globals.css`, `src/app/layout.tsx`, `src/app/page.tsx` — directly; it must instead report the exact patch it needs (e.g. a new keyframe, a new icon) in its completion message for you to apply during Reconcile. This is enforced by the POSIX permission lock from Phase 2 (`lock-shared.sh`), which is the actual tested-working mechanism: the files are read-only at the OS level, so Edit/Write **and** bash workarounds like `echo >>` or `sed -i` both fail. The project-level `opencode.json` `agent.designer.permission.edit` deny rule is left in place opportunistically but is **currently inert** — it was empirically proven non-functional on this install (4 live tests, including a blanket deny-all, all failed to block anything). Harmless if it ever starts working; never relied upon.
+- Its section folder: `src/sections/<section-name>/` — the builder creates its component there (`src/sections/<section-name>/<ComponentName>.tsx`), any scoped CSS, plus a `section.meta.json`. Paste this exact schema into the prompt; never tell the builder to go read it from the scaffold README:
 
-**What every builder agent receives:**
-- The full contents of its component spec file (inline in the prompt — don't say "go read the spec file")
-- Path to the section screenshot in `docs/design-references/`
-- Which shared components to import (`icons.tsx`, `cn()`, shadcn primitives)
-- The target file path (e.g., `src/components/HeroSection.tsx`)
-- Instruction to verify with `npx tsc --noEmit` before finishing
-- For responsive behavior: the specific breakpoint values and what changes
+  ```json
+  {
+    "order": 20,
+    "componentName": "HeroSection",
+    "importPath": "../sections/hero/HeroSection"
+  }
+  ```
 
-**Don't wait.** As soon as you've dispatched the builder(s) for one section, move to extracting the next section. Builders work in parallel in their worktrees while you continue extraction.
+  All 3 fields are **required**: `order` (number — ascending position on the page, unique across sections; you assign it, and leave gaps of 10 so a section can be inserted later without renumbering), `componentName` (string, PascalCase, must match the actual named export from the `.tsx` exactly), `importPath` (string — path to that `.tsx`, relative to `src/app/page.tsx`). Codegen **hard-fails the entire batch** if any field is missing, misspelled, or the wrong type — it does not silently skip the offending section. New icons go in `src/components/icons/<IconName>.tsx`, one file per icon; the builder never touches `src/components/icons/index.ts` (generated barrel) and never creates `src/components/icons.tsx`.
+- An explicit note that the 3 shared files (`globals.css`, `layout.tsx`, `page.tsx`) are locked (POSIX permissions) during this phase — attempting to edit them will fail at the OS level, not just be discouraged by convention. If a builder genuinely needs something added to one of these (e.g. a new global keyframe), it reports the request in its completion message instead.
+- Verify `npx tsc --noEmit` before finishing; report files written + anything uncertain.
 
-### Step 4: Merge
+### Step 4: Reconcile
+As builders finish: confirm each target file exists, then run `npm run build`. Fix any type errors immediately (you have full context). Continue extract→spec→dispatch→reconcile until all sections are built.
 
-As builder agents complete their work:
-- Merge their worktree branches into main
-- You have full context on what each agent built, so resolve any conflicts intelligently
-- After each merge, verify the build still passes: `npm run build`
-- If a merge introduces type errors, fix them immediately
+Run the rest of Reconcile in exactly this order. Only steps 4-5 sit inside the unlock window — opened at step 3, closed at step 6 — because they are the only ones that write to the locked shared files, and what they write (hand-applied patches and codegen output alike) is legitimate orchestrator-authored content. Keep that window as narrow as this; everything else, including the claims ledger, works fine with the files locked. Never leave the shared files unlocked across a builder dispatch.
 
-The extract → spec → dispatch → merge cycle continues until all sections are built.
+1. **Token-lint the batch:** `node "$H/scripts/token-lint.mjs" docs/research/tokens.lock.json src` (equivalently, `npm run lint:tokens` inside the cloned project — the scaffold ships this as an npm script). Fix real violations, or confirm each is covered by an `@clone-degraded:` comment and logged in `docs/research/DEGRADATIONS.md` (create this file on first use — one row per degradation: file, reason, date). Use `--report-only` on the first run against any new target to sanity-check the lock before enforcing. A handful of legitimate violations is normal on a real site; if violations are still near-universal, that's a genuine signal worth investigating (check the lock's `--min-count`/`--top` curation settings) rather than an expected default.
+2. **Run the tripwire check:** `bash "$H/scripts/tripwire-check.sh" . <the most recent baseline commit — Phase 2's pre-dispatch commit for the first batch, or the previous batch's step 9 re-baseline commit for every batch after that>` — reverts anything that slipped past the lock and prints the diff. Run it first, while the files are still locked: it is self-contained and handles lock state itself via a narrow per-file unlock → revert → re-lock cycle, so it works whether the tree is currently locked or not. If anything was reverted, fold the reported change into that builder's legitimate request path (fragment folder or an orchestrator-applied patch) rather than just discarding it.
+3. **Unlock:** `bash "$H/scripts/unlock-shared.sh" .`.
+4. **Apply builder patch requests:** every shared-file patch builders reported in their completion messages (dedupe overlapping asks — e.g. two builders both requesting the same icon).
+5. **Regenerate the derived files:** `node "$H/scripts/codegen.mjs" .` — rebuilds `globals.css`'s import block, the icons barrel, and `page.tsx`'s section mounts from this batch's fragment folders. This has to run here, inside the unlock window: codegen writes directly into `globals.css` and `page.tsx`, and it refuses with "run unlock-shared.sh first" if they're still locked. `--check` is read-only and works at any point if you want to preview the diff before writing.
+6. **Re-lock:** `bash "$H/scripts/lock-shared.sh" .`.
+7. **Verify the re-lock took:** `bash "$H/scripts/verify-shared.sh" .` — exit 0 (PASS) is the only green result; see the Pre-Dispatch Checklist for what exit 1 and exit 3 mean.
+8. **Update and validate the claims ledger:** in `.runtime-claims.json`, mark any global infra this batch installed as `{"status": "installed", "owner": "<builder/component that claimed it>", "file": "<path where the infra lives>"}` — `owner` is who claimed the infra, `file` is the actual on-disk path builders will import from, and both are required (non-null strings) once `status` is `"installed"` — and mark any signature slot a builder claimed as spent. Then validate it: `node "$H/scripts/validate-claims.mjs" docs/research/.runtime-claims.json docs/research/components`. Fix any structural violation or stale claim before dispatching the next batch — a claims file that's wrong is worse than one that doesn't exist, since every subsequent Shared-Scope Contract is rendered from it.
+9. **Re-baseline for the next batch:** `git add -A && git commit -m 'chore: post-reconcile baseline'`. This commit — not the Phase 2 one — is the baseline the NEXT batch's tripwire-check diverges against. Using a stale baseline makes the tripwire revert the previous batch's legitimate work (codegen output self-heals since it's regenerated every run, but hand-applied patches do not — they're silently and permanently lost, reported as a successful revert).
 
 ## Phase 4: Page Assembly
-
-After all sections are built and merged, wire everything together in `src/app/page.tsx`:
-
-- Import all section components
-- Implement the page-level layout from your topology doc (scroll containers, column structures, sticky positioning, z-index layering)
-- Connect real content to component props
-- Implement page-level behaviors: scroll snap, scroll-driven animations, dark-to-light transitions, intersection observers, smooth scroll (Lenis etc.)
-- Verify: `npm run build` passes clean
+Wire everything in `src/app/page.tsx`: import sections, implement the page-level layout from `PAGE_TOPOLOGY.md` (scroll containers, columns, sticky/fixed, z-index), connect real content to props, implement page-level behaviors (scroll-snap, scroll-driven animations, theme transitions, IntersectionObservers, Lenis). Verify `npm run build` clean.
 
 ## Phase 5: Visual QA Diff
+Do NOT declare done at assembly. Run the clone (`npm run dev`) and compare against the original:
+1. **Final unlock — always, and this one is permanent:** `bash "$H/scripts/unlock-shared.sh" .`. All builders are done, so the lock has no remaining job, and QA fixes routinely need `globals.css`/`layout.tsx`/`page.tsx`. **Do NOT re-lock afterward** — this is the one unlock in the pipeline that is not paired with a `lock-shared.sh`. Leaving the lock on hands the user a permanently read-only project they can't edit or even `rm -rf` without manually `chmod`-ing first.
+2. `screenshot` the original and your clone at the same widths (1440 and 390, `--full`).
+3. Compare section by section, top to bottom, both viewports.
+4. For each discrepancy: if the spec was wrong, re-extract → update spec → fix component; if the spec was right but the build diverged, fix the component to match.
+5. Drive interactions on the clone (`--scroll`/`--click`/`--hover`) and confirm scroll behavior, header transitions, tab switching, and animations match the original.
 
-After assembly, do NOT declare the clone complete. Take side-by-side comparison screenshots:
-
-1. Open the original site and your clone side-by-side (or take screenshots at the same viewport widths)
-2. Compare section by section, top to bottom, at desktop (1440px)
-3. Compare again at mobile (390px)
-4. For each discrepancy found:
-   - Check the component spec file — was the value extracted correctly?
-   - If the spec was wrong: re-extract from browser MCP, update the spec, fix the component
-   - If the spec was right but the builder got it wrong: fix the component to match the spec
-5. Test all interactive behaviors: scroll through the page, click every button/tab, hover over interactive elements
-6. Verify smooth scroll feels right, header transitions work, tab switching works, animations play
-
-Only after this visual QA pass is the clone complete.
+Only after this pass is the clone complete. Before reporting, confirm the shared files are still writable — the project you hand back is a normal, editable one.
 
 ## Pre-Dispatch Checklist
-
-Before dispatching ANY builder agent, verify you can check every box. If you can't, go back and extract more.
-
-- [ ] Spec file written to `docs/research/components/<name>.spec.md` with ALL sections filled
-- [ ] Every CSS value in the spec is from `getComputedStyle()`, not estimated
-- [ ] Interaction model is identified and documented (static / click / scroll / time)
-- [ ] For stateful components: every state's content and styles are captured
-- [ ] For scroll-driven components: trigger threshold, before/after styles, and transition are recorded
-- [ ] For hover states: before/after values and transition timing are recorded
-- [ ] All images in the section are identified (including overlays and layered compositions)
-- [ ] Responsive behavior is documented for at least desktop and mobile
-- [ ] Text content is verbatim from the site, not paraphrased
-- [ ] The builder prompt is under ~150 lines of spec; if over, the section needs to be split
+Before dispatching ANY builder, verify every box; if you can't, extract more.
+- [ ] Spec file written with ALL sections filled
+- [ ] Every CSS value is from `getComputedStyle` (the `extract` command), not estimated
+- [ ] Interaction model identified and documented
+- [ ] For stateful components: every state's content + styles captured
+- [ ] For scroll-driven: trigger threshold, before/after styles, transition recorded
+- [ ] For hover: before/after + transition timing recorded
+- [ ] All images identified (including overlays/layered compositions)
+- [ ] Responsive documented for at least desktop + mobile
+- [ ] Text is verbatim, not paraphrased
+- [ ] Builder spec is under ~150 lines; if over, split the section
+- [ ] `token-lint` passes on the previous batch (or every violation is `@clone-degraded` + logged in DEGRADATIONS.md) before dispatching the next
+- [ ] Each builder's Shared-Scope Contract is resolved from the current `.runtime-claims.json` before its prompt is written
+- [ ] `.runtime-claims.json` passes `validate-claims.mjs` (or every violation/stale claim is resolved) before dispatching the next batch
+- [ ] `verify-shared.sh` exits 0 (PASS) before dispatching the next batch — exit 3 (PARTIAL) is NOT a pass and must be resolved first; exit 1 (FAIL) means the lock itself is broken
+- [ ] `tripwire-check.sh` shows no reverted files from the previous batch, or every reversion has been folded into a legitimate fragment/patch
 
 ## What NOT to Do
-
-These are lessons from previous failed clones — each one cost hours of rework:
-
-- **Don't build click-based tabs when the original is scroll-driven (or vice versa).** Determine the interaction model FIRST by scrolling before clicking. This is the #1 most expensive mistake — it requires a complete rewrite, not a CSS fix.
-- **Don't extract only the default state.** If there are tabs showing "Featured" on load, click Productivity, Creative, Lifestyle and extract each one's cards/content. If the header changes on scroll, capture styles at position 0 AND position 100+.
-- **Don't miss overlay/layered images.** A background watercolor + foreground UI mockup = 2 images. Check every container's DOM tree for multiple `<img>` elements and positioned overlays.
-- **Don't build mockup components for content that's actually videos/animations.** Check if a section uses `<video>`, Lottie, or canvas before building elaborate HTML mockups of what the video shows.
-- **Don't approximate CSS classes.** "It looks like `text-lg`" is wrong if the computed value is `18px` and `text-lg` is `18px/28px` but the actual line-height is `24px`. Extract exact values.
-- **Don't build everything in one monolithic commit.** The whole point of this pipeline is incremental progress with verified builds at each step.
-- **Don't reference docs from builder prompts.** Each builder gets the CSS spec inline in its prompt — never "see DESIGN_TOKENS.md for colors." The builder should have zero need to read external docs.
-- **Don't skip asset extraction.** Without real images, videos, and fonts, the clone will always look fake regardless of how perfect the CSS is.
-- **Don't give a builder agent too much scope.** If you're writing a builder prompt and it's getting long because the section is complex, that's a signal to break it into smaller tasks.
-- **Don't bundle unrelated sections into one agent.** A CTA section and a footer are different components with different designs — don't hand them both to one agent and hope for the best.
-- **Don't skip responsive extraction.** If you only inspect at desktop width, the clone will break at tablet and mobile. Test at 1440, 768, and 390 during extraction.
-- **Don't forget smooth scroll libraries.** Check for Lenis (`.lenis` class), Locomotive Scroll, or similar. Default browser scrolling feels noticeably different and the user will spot it immediately.
-- **Don't dispatch builders without a spec file.** The spec file forces exhaustive extraction and creates an auditable artifact. Skipping it means the builder gets whatever you can fit in a prompt from memory.
+- **Don't build click-tabs when the original is scroll-driven (or vice versa).** Determine the model FIRST by scrolling before clicking. #1 most expensive mistake — full rewrite, not a CSS fix.
+- **Don't extract only the default state.** Click each tab; capture header at scroll 0 AND past the threshold.
+- **Don't miss overlay/layered images.** Check every container's DOM for multiple `<img>` + positioned overlays.
+- **Don't build mockups for content that's actually video/Lottie/canvas.** Check first.
+- **Don't approximate CSS.** Extract exact computed values, not "looks like text-lg".
+- **Don't reference external docs from builder prompts.** The spec goes inline.
+- **Don't skip asset extraction.** Without real images/videos/fonts the clone looks fake.
+- **Don't over-scope a builder.** Long prompt = split the section.
+- **Don't bundle unrelated sections** (a CTA and a footer are different builders).
+- **Don't skip responsive extraction** (test 1440 / 768 / 390).
+- **Don't forget smooth-scroll libraries** (Lenis etc. — native scroll feels different and users notice).
+- **Don't dispatch a builder without a spec file.**
 
 ## Completion
+Report: sections built, components created, spec files written (should match components), assets downloaded, `npm run build` status, visual-QA results (remaining discrepancies), and known gaps/limitations. Confirm the final `unlock-shared.sh` from Phase 5 ran and was not followed by a re-lock — you hand back a normal, writable project, never a read-only one.
 
-When done, report:
-- Total sections built
-- Total components created
-- Total spec files written (should match components)
-- Total assets downloaded (images, videos, SVGs, fonts)
-- Build status (`npm run build` result)
-- Visual QA results (any remaining discrepancies)
-- Any known gaps or limitations
+## Honest Limitations
+Pixel-perfection is the target, not a guarantee. Expect lower fidelity on Canvas/WebGL/Three.js scenes, heavy GSAP/scroll-timeline motion, licensed/auth-gated fonts and content, A/B-tested or personalized pages, and sites that block headless browsers. Clone only sites you are authorized to replicate; logos, brand assets, and copy belong to their owners. Token-lock tolerance is a real tradeoff — too tight and it false-positives on legitimate values a messy live site actually uses, too loose and it stops protecting anything; see Phase 3 Step 4 for the `--report-only` first-run check. Never raise the tolerance blindly to silence violations.
+
+## References
+- `references/INSPECTION_GUIDE.md` — checklist of what to capture (design tokens, components, layout, tech stack).
+- `scaffold/` — the Next.js 16 + shadcn + Tailwind v4 base copied during Pre-Flight.
+- `scaffold/AGENTS.md` — code-style + structure rules for the generated project.
+- `motion/index.json` — optional, manually-curated verb catalog (durations, easings, stagger, overshoot ranges). Not auto-generated: `scripts/distill-motion.mjs` produces a raw, unclustered `motion-corpus-raw.json` observation dump from a reference-repo corpus; turning that into named verbs with numeric ranges is a deliberate human curation step (an agent auto-naming interaction verbs risks injecting confidently-wrong motion data). If `motion/index.json` doesn't exist yet, Phase 3 extraction proceeds exactly as before, purely from live measurement.
+- `scripts/token-lint.mjs` — token containment linter used in Phase 3 Step 4 Reconcile.
+- `scripts/validate-claims.mjs` — validates `.runtime-claims.json` structure and staleness, used in Phase 3 Step 4 Reconcile.
+- `scripts/lock-shared.sh` / `unlock-shared.sh` / `verify-shared.sh` — POSIX permission lock protecting the 3 shared files (`globals.css`, `layout.tsx`, `page.tsx`), replacing the (confirmed non-functional on this install) OpenCode agent-permission deny rule. The old `icons.tsx` vault-symlink is retired: icons now live one-per-file under `src/components/icons/` behind a generated barrel, so there's nothing to contend over. Run `unlock-shared.sh` once more at the end of Phase 5 and leave it unlocked. Know its real limit: this is a same-UID POSIX lock — it stops normal edits and common bypass tricks (temp-file+rename, etc.) but cannot stop an agent that deliberately runs `chmod` to unlock/edit/re-lock itself. The tripwire check (`tripwire-check.sh`) is the layer that catches that case, since it detects content drift regardless of how the write got through.
+- `scripts/permission-canary.sh` — live-tests the lock mechanism before trusting it; never claim enforcement without this passing.
+- `scripts/tripwire-check.sh` — git-diff based detect-and-revert defense-in-depth layer.
+- `scripts/codegen.mjs` — regenerates globals.css/icons barrel/page.tsx from per-section fragment folders, removing the reason to contend over these files in the first place.

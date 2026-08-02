@@ -1,0 +1,10 @@
+{
+  "name": "clone-website-inspect",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Playwright inspection helper for the clone-website opencode skill",
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

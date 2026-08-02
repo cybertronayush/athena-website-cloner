@@ -1,25 +1,19 @@
 {
-  "name": "ai-website-clone-template",
+  "name": "madmethod-website-cloner",
   "version": "0.3.1",
   "private": true,
-  "description": "Clone any website into a clean, modern Next.js codebase using AI coding agents",
-  "author": "JCodesMore",
+  "description": "An AI-agent pipeline that reverse-engineers any website into a pixel-perfect Next.js 16 codebase, extracting design tokens, components, and assets.",
+  "author": "Ayush Singh (madmethod.io)",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/JCodesMore/ai-website-cloner-template.git"
-  },
-  "homepage": "https://github.com/JCodesMore/ai-website-cloner-template",
-  "bugs": {
-    "url": "https://github.com/JCodesMore/ai-website-cloner-template/issues"
-  },
   "keywords": [
-    "claude-code",
+    "website-cloner",
     "website-clone",
+    "website-rebuild",
     "reverse-engineering",
+    "web-scraping",
+    "design-tokens",
+    "ai-agent",
     "nextjs",
-    "ai",
-    "template",
     "tailwindcss",
     "shadcn-ui"
   ],

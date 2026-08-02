@@ -1,0 +1,3 @@
+# Playwright + deps for the inspection scripts.
+# Install locally with: npm install --prefix .claude/skills/clone-website/scripts
+node_modules/
