@@ -76,11 +76,13 @@ npm install && npx playwright install chromium
 
 **2. Make the skill visible to your agent.** `.claude/skills/clone-website/` is the canonical copy, carrying `SKILL.md`, `scripts/` and the `scaffold/`. The `.codex/`, `.github/` and `.opencode/` copies are generated from it by `node scripts/sync-skills.mjs`.
 
-**3. Run it** against one or more targets:
+**3. Run it** against one or more targets. **This is not a terminal command — type it directly to your AI coding agent** (Claude Code, Cursor, OpenCode, etc.), the same way you'd type any other instruction to it:
 
 ```
 /clone-website <url> [<url2> ...]
 ```
+
+That block is a slash-command / agent prompt, not shell syntax. Pasting it into a terminal does nothing. (See **[Commands (inside a generated clone project)](#commands-inside-a-generated-clone-project)** below for how to actually view what gets built — `npm run dev` — once sections exist.)
 
 The skill bootstraps a fresh Next.js scaffold in your target directory (`scaffold/` is copied during Pre-Flight), verifies the tree is a git repo (the tripwire needs history to diff against), confirms the target is reachable and not blocking headless browsers, then walks the five phases. Multiple URLs get isolated artifacts under `docs/research/<hostname>/`.
 
@@ -149,9 +151,9 @@ The tool targets, and its scaffold ships:
 
 The extraction scripts themselves are plain Node. Only `inspect.mjs` has a dependency (Playwright); `token-lint.mjs`, `codegen.mjs` and `validate-claims.mjs` have none. The lock and tripwire layer is POSIX shell.
 
-## Commands
+## Commands (inside a generated clone project)
 
-Inside a generated clone project:
+These commands run inside whatever Next.js project `/clone-website` produces, not the cloning tool itself. Run them from the project root after (or during) a clone, the same as any Next.js app.
 
 ```bash
 npm run dev         # Dev server
