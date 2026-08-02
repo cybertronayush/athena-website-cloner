@@ -42,7 +42,7 @@ const SPIN_IN_DEGREES = 29.8;
 const SPIN_IN_DECAY_MS = 500;
 
 const CARD_MEDIA_CLASS =
-  "h-full w-full overflow-clip rounded-2xs object-cover [backface-visibility:hidden] md:rounded-lg";
+  "h-full w-full overflow-clip rounded-card object-cover [backface-visibility:hidden] md:rounded-lg";
 
 export function HeroSection() {
   const carouselRef = useRef<HTMLDivElement>(null);
@@ -111,7 +111,6 @@ export function HeroSection() {
       <div className="hero-rise-deep relative flex flex-col items-center justify-center gap-10 overflow-x-clip [perspective:800px] [transform-style:preserve-3d] md:gap-0 md:py-30">
         <div
           ref={carouselRef}
-          /* @clone-degraded: viewport-relative unit (vh), token-lint has no vh/vw comparison logic yet — same class of gap as the already-handled em case */
           className="carousel flex h-[33vh] w-1/2 items-center justify-center bg-transparent [backface-visibility:hidden] [transform-style:preserve-3d] will-change-transform md:w-1/4"
         >
           {CARDS.map((card, index) => {
