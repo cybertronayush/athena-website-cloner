@@ -1,0 +1,447 @@
+{
+  "images": [
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/bsp-logotype.0a3.jbkx-aafu.svg",
+      "alt": "BSP Logotype",
+      "naturalWidth": 1336,
+      "naturalHeight": 180,
+      "parentClasses": "self-center",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2FEventbrite-card.0dicxoix9jng6.webp&w=1080&q=75",
+      "alt": "",
+      "naturalWidth": 864,
+      "naturalHeight": 1080,
+      "parentClasses": "card absolute box-border aspect-4/5 w-full will-change-transform backface-hidden",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/Vimeo_logo.17lz468ls-ec~.svg",
+      "alt": "Vimeo logo",
+      "naturalWidth": 151,
+      "naturalHeight": 47,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-9 desktop:mb-5 desktop:h-[41px] lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fvimeo_card.0pwnstl_mzsu_.webp&w=3840&q=75",
+      "alt": "Vimeo card",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/Evernote_logo.14-u8uoxjng17.svg",
+      "alt": "Evernote logo",
+      "naturalWidth": 243,
+      "naturalHeight": 59,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-10 desktop:mb-5 desktop:h-[43px] lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/Remini_logo.0kxpiq0b22ww5.svg",
+      "alt": "Remini logo",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-[34px] desktop:mb-5 desktop:h-[36px] lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/WeTransfer_logo.1237tvbre8dwl.svg",
+      "alt": "WeTransfer logo",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-[25px] desktop:mb-5 desktop:h-[31px] lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fwetransfer_card.0j3nad9tubslf.webp&w=3840&q=75",
+      "alt": "WeTransfer card",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/eventbrite_logo_new.0outeb4oavz~o.svg",
+      "alt": "Eventbrite logo",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-[34px] desktop:mb-5 desktop:h-10 lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Feventbrite_card.0ae4n2gm9hsij.webp&w=3840&q=75",
+      "alt": "Eventbrite card",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/Meetup_logo.0e41~~59hz-h3.svg",
+      "alt": "Meetup logo",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-10 desktop:mb-5 desktop:h-[52px] lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/Komoot_logo.10qx13.k.r.~k.svg",
+      "alt": "Komoot logo",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-[34px] desktop:mb-5 desktop:h-[46px] lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/AOL_logo.0x6gm3_k.pf1~.svg",
+      "alt": "AOL logo",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-[30px] desktop:mb-5 desktop:h-[45px] lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Faol_card.0gpy5df5r6029.webp&w=3840&q=75",
+      "alt": "AOL card",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/stream-yard_logo.0olz8-onrx8pn.svg",
+      "alt": "StreamYard logo",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-7 desktop:mb-5 desktop:h-[35px] lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fstreamyard_card.0ez75w0op~091.webp&w=3840&q=75",
+      "alt": "StreamYard card",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/Brightcove_logo.0wznvz9-jhr9j.svg",
+      "alt": "Brightcove logo",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "mb-0 flex shrink-0 items-center h-9 desktop:mb-5 desktop:h-[48px] lg:mb-0",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Finterview-1.0qh.rko_r6807.webp&w=3840&q=75",
+      "alt": "Interview 1",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "embla__scale__layer w-full overflow-hidden",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Finterview-2.0nrc6dzqp6xk2.webp&w=3840&q=75",
+      "alt": "Interview 2",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "embla__scale__layer w-full overflow-hidden",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Finterview-3.036xvxsjiie_2.webp&w=3840&q=75",
+      "alt": "Interview 3",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "embla__scale__layer w-full overflow-hidden",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Finterview-4.0ianh5me5q.ni.webp&w=3840&q=75",
+      "alt": "Interview 4",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "embla__scale__layer w-full overflow-hidden",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Finterview-5.0o.1q1_qk3r.m.webp&w=3840&q=75",
+      "alt": "Interview 5",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "embla__scale__layer w-full overflow-hidden",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Finterview-6.0gi8mj~vh6xvd.webp&w=3840&q=75",
+      "alt": "Interview 6",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "embla__scale__layer w-full overflow-hidden",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fbadge_italy_gptw.0lqt68bhwgsqj.webp&w=1200&q=75",
+      "alt": "Great Place to Work Italy badges - first place in 2025, 2023, 2020, and 2019",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "basis-1/3 flex-col items-center justify-center rounded-40 py-8 md:flex md:p-12",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fbadge_europe_gptw.10b60a1ktbzuy.webp&w=1080&q=75",
+      "alt": "Great Place to Work Europe badges - third place in 2025",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "col-start-3 row-start-1 basis-1/3 flex-col items-center justify-center rounded-4",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/glassdoor_rating.017hy6l67w96h.svg",
+      "alt": "Glassdoor ratings",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "col-start-2 row-start-1 flex basis-1/3 flex-col items-center justify-center roun",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/glassdoor_logo.0veqqw0~yufh-.svg",
+      "alt": "Glassdoor logo",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "col-start-2 row-start-1 flex basis-1/3 flex-col items-center justify-center roun",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fglassdoor_reviews.0rzonju71itha.webp&w=1920&q=75",
+      "alt": "Some very positive reviews",
+      "naturalWidth": 0,
+      "naturalHeight": 0,
+      "parentClasses": "col-start-2 row-start-1 flex basis-1/3 flex-col items-center justify-center roun",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://www.bendingspoons.com/_next/static/media/bsp-logotype.0a3.jbkx-aafu.svg",
+      "alt": "Logotype",
+      "naturalWidth": 1336,
+      "naturalHeight": 180,
+      "parentClasses": "pt-6",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://cdn.cookielaw.org/logos/7166fed7-dcf8-4255-833c-9f267f90c2a3/90c3fdd0-a1a5-4c5a-8f85-1c1383356d57/6067ac34-6bb6-42d2-b287-eaee8eda180c/filecut_2000x200_1.png",
+      "alt": "Bending Spoons",
+      "naturalWidth": 2000,
+      "naturalHeight": 200,
+      "parentClasses": "ot-pc-logo",
+      "position": "static",
+      "zIndex": "auto"
+    },
+    {
+      "src": "https://cdn.cookielaw.org/logos/static/powered_by_logo.svg",
+      "alt": "Powered by Onetrust",
+      "naturalWidth": 568,
+      "naturalHeight": 53,
+      "parentClasses": "",
+      "position": "static",
+      "zIndex": "auto"
+    }
+  ],
+  "videos": [
+    {
+      "src": "https://www.bendingspoons.com/videos/hero-cards-home/komoot.mp4",
+      "poster": "",
+      "autoplay": true,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/hero-cards-home/evernote.mp4",
+      "poster": "",
+      "autoplay": true,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/hero-cards-home/vimeo.mp4",
+      "poster": "",
+      "autoplay": true,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/hero-cards-home/wetransfer.mp4",
+      "poster": "",
+      "autoplay": true,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/hero-cards-home/remini.mp4",
+      "poster": "",
+      "autoplay": true,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/hero-cards-home/brightcove.mp4",
+      "poster": "",
+      "autoplay": true,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/hero-cards-home/meetup.mp4",
+      "poster": "",
+      "autoplay": true,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/hero-cards-home/streamyard.mp4",
+      "poster": "",
+      "autoplay": true,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/hero-cards-home/aol.mp4",
+      "poster": "",
+      "autoplay": true,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/product-cards/product-card-animation-Evernote.mp4",
+      "poster": "",
+      "autoplay": false,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/product-cards/product-card-animation-Remini.mp4",
+      "poster": "",
+      "autoplay": false,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/product-cards/product-card-animation-Meetup.mp4",
+      "poster": "",
+      "autoplay": false,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/product-cards/product-card-animation-Komoot.mp4",
+      "poster": "",
+      "autoplay": false,
+      "loop": true,
+      "muted": true
+    },
+    {
+      "src": "https://www.bendingspoons.com/videos/product-cards/product-card-animation-Brightcove.mp4",
+      "poster": "",
+      "autoplay": false,
+      "loop": true,
+      "muted": true
+    }
+  ],
+  "backgroundImages": [
+    {
+      "url": "linear-gradient(to right, rgba(0, 0, 0, 0) 0%, oklab(0 0 0 / 0.2) 100%)",
+      "element": "span.mt-1"
+    },
+    {
+      "url": "linear-gradient(to left, rgba(0, 0, 0, 0) 0%, oklab(0 0 0 / 0.2) 100%)",
+      "element": "span.mt-1"
+    },
+    {
+      "url": "linear-gradient(to right, rgba(0, 0, 0, 0) 0%, oklab(0.999994 0.0000455678 0.0000200868 / 0.2) 100%)",
+      "element": "span.mt-1"
+    },
+    {
+      "url": "linear-gradient(to left, rgba(0, 0, 0, 0) 0%, oklab(0.999994 0.0000455678 0.0000200868 / 0.2) 100%)",
+      "element": "span.mt-1"
+    },
+    {
+      "url": "radial-gradient(at 50% 75%, lab(65.5349 -2.25151 -14.5072) 0%, lab(1.76974 1.32743 -9.28855) 100%)",
+      "element": "span.block"
+    },
+    {
+      "url": "radial-gradient(at 50% 75%, lab(65.5349 -2.25151 -14.5072) 0%, lab(1.76974 1.32743 -9.28855) 100%)",
+      "element": "span.block"
+    },
+    {
+      "url": "radial-gradient(at 50% 75%, lab(65.5349 -2.25151 -14.5072) 0%, lab(1.76974 1.32743 -9.28855) 100%)",
+      "element": "span.block"
+    },
+    {
+      "url": "radial-gradient(at 50% 75%, lab(65.5349 -2.25151 -14.5072) 0%, lab(1.76974 1.32743 -9.28855) 100%)",
+      "element": "span.block"
+    },
+    {
+      "url": "radial-gradient(at 50% 75%, lab(65.5349 -2.25151 -14.5072) 0%, lab(1.76974 1.32743 -9.28855) 100%)",
+      "element": "span.block"
+    },
+    {
+      "url": "radial-gradient(at 50% 75%, lab(65.5349 -2.25151 -14.5072) 0%, lab(1.76974 1.32743 -9.28855) 100%)",
+      "element": "span.block"
+    },
+    {
+      "url": "url(\"https://cdn.cookielaw.org/logos/static/ot_close.svg\")",
+      "element": "button.ot-close-icon"
+    },
+    {
+      "url": "url(\"https://cdn.cookielaw.org/logos/7166fed7-dcf8-4255-833c-9f267f90c2a3/018e6a9c-17e5-7dd5-911e-d350a251a0b0/20521bc6-26cb-4773-a089-8c1321af20b6/cookie-icon-black.png\")",
+      "element": "div.ot-floating-button__front"
+    }
+  ],
+  "svgCount": 40,
+  "fonts": [
+    "-apple-system, \"system-ui\", \"Segoe UI\", Roboto, \"Helvetica Neue\", \"Noto Sans\", Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", \"Noto Color Emoji\"",
+    "\"Instrument Sans\", \"Instrument Sans Fallback\"",
+    "\"Instrument Serif\", \"Instrument Serif Fallback\"",
+    "Times"
+  ],
+  "favicons": [
+    {
+      "href": "https://www.bendingspoons.com/favicon.ico?favicon.0n_daryx2e67h.ico",
+      "rel": "icon",
+      "sizes": "64x64"
+    }
+  ]
+}

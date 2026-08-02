@@ -1,0 +1,263 @@
+{
+  "elementsSampled": 2449,
+  "colors": [
+    {
+      "value": "rgb(0, 0, 0)",
+      "count": 3714
+    },
+    {
+      "value": "rgb(255, 255, 255)",
+      "count": 973
+    },
+    {
+      "value": "rgb(105, 105, 105)",
+      "count": 89
+    },
+    {
+      "value": "rgb(85, 85, 85)",
+      "count": 27
+    },
+    {
+      "value": "rgb(199, 255, 159)",
+      "count": 19
+    },
+    {
+      "value": "oklab(0.999994 0.0000455678 0.0000200868 / 0.5)",
+      "count": 12
+    },
+    {
+      "value": "oklab(0 0 0 / 0.05)",
+      "count": 8
+    },
+    {
+      "value": "oklab(0 0 0 / 0.3)",
+      "count": 6
+    },
+    {
+      "value": "rgb(56, 96, 190)",
+      "count": 6
+    },
+    {
+      "value": "rgb(101, 101, 101)",
+      "count": 4
+    },
+    {
+      "value": "rgb(248, 248, 248)",
+      "count": 3
+    }
+  ],
+  "spacing": [
+    {
+      "value": "12px",
+      "count": 55
+    },
+    {
+      "value": "10px",
+      "count": 42
+    },
+    {
+      "value": "40px",
+      "count": 42
+    },
+    {
+      "value": "8px",
+      "count": 40
+    },
+    {
+      "value": "20px",
+      "count": 39
+    },
+    {
+      "value": "4px",
+      "count": 37
+    },
+    {
+      "value": "32px",
+      "count": 37
+    },
+    {
+      "value": "5px",
+      "count": 24
+    },
+    {
+      "value": "48px",
+      "count": 21
+    },
+    {
+      "value": "24px",
+      "count": 21
+    },
+    {
+      "value": "28px",
+      "count": 20
+    },
+    {
+      "value": "30px",
+      "count": 20
+    },
+    {
+      "value": "0px 0px 4px 28px",
+      "count": 18
+    },
+    {
+      "value": "0px 0px 4px",
+      "count": 14
+    },
+    {
+      "value": "16px",
+      "count": 14
+    },
+    {
+      "value": "120px",
+      "count": 13
+    },
+    {
+      "value": "6px",
+      "count": 13
+    },
+    {
+      "value": "15px",
+      "count": 13
+    },
+    {
+      "value": "36px",
+      "count": 11
+    },
+    {
+      "value": "25px",
+      "count": 11
+    }
+  ],
+  "radii": [
+    {
+      "value": "3.35544e+07px",
+      "count": 28
+    },
+    {
+      "value": "2px",
+      "count": 20
+    },
+    {
+      "value": "40px",
+      "count": 14
+    },
+    {
+      "value": "50px",
+      "count": 11
+    },
+    {
+      "value": "32px",
+      "count": 10
+    }
+  ],
+  "fonts": [
+    {
+      "value": "\"Instrument Sans\", \"Instrument Sans Fallback\"",
+      "count": 2385
+    },
+    {
+      "value": "-apple-system, \"system-ui\", \"Segoe UI\", Roboto, \"Helvetica Neue\", \"Noto Sans\", Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", \"Noto Color Emoji\"",
+      "count": 35
+    },
+    {
+      "value": "\"Instrument Serif\", \"Instrument Serif Fallback\"",
+      "count": 15
+    },
+    {
+      "value": "Times",
+      "count": 9
+    },
+    {
+      "value": "\"Fragment Mono\", \"Fragment Mono Fallback\"",
+      "count": 5
+    }
+  ],
+  "shadows": [
+    {
+      "value": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgb(0, 0, 0) 0px 100px 100px -100px",
+      "count": 6
+    }
+  ],
+  "fontSizes": [
+    {
+      "value": "16px",
+      "count": 1833
+    },
+    {
+      "value": "64px",
+      "count": 395
+    },
+    {
+      "value": "15px",
+      "count": 66
+    },
+    {
+      "value": "17px",
+      "count": 26
+    },
+    {
+      "value": "24px",
+      "count": 24
+    },
+    {
+      "value": "12px",
+      "count": 20
+    },
+    {
+      "value": "13.008px",
+      "count": 16
+    },
+    {
+      "value": "13.12px",
+      "count": 7
+    },
+    {
+      "value": "42px",
+      "count": 6
+    },
+    {
+      "value": "25px",
+      "count": 6
+    },
+    {
+      "value": "14px",
+      "count": 6
+    },
+    {
+      "value": "13.6px",
+      "count": 6
+    },
+    {
+      "value": "100px",
+      "count": 5
+    },
+    {
+      "value": "14.08px",
+      "count": 5
+    },
+    {
+      "value": "22px",
+      "count": 4
+    },
+    {
+      "value": "125px",
+      "count": 3
+    },
+    {
+      "value": "185px",
+      "count": 3
+    },
+    {
+      "value": "145px",
+      "count": 3
+    },
+    {
+      "value": "32px",
+      "count": 3
+    },
+    {
+      "value": "67px",
+      "count": 3
+    }
+  ]
+}
