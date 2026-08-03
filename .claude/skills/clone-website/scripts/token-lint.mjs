@@ -377,6 +377,28 @@ const padLengths = (seq, width) => {
   return out
 }
 
+// Bug 10: a shadow property holds a COMMA-SEPARATED LIST of layers, and a real
+// computed lock entry is routinely multi-layer (Tailwind's `shadow-*` utilities
+// alone emit five). `shadowsMatch` flattens whatever it is handed into ONE color
+// + one ordered length run, so a single authored layer could never line up with
+// a multi-layer lock entry, and vice versa. Split both sides into layers first.
+// Commas inside a function call (`rgba(0, 0, 0, .5)`) are NOT layer separators,
+// so track paren depth rather than doing a naive `.split(',')`.
+const shadowLayers = (v) => {
+  const s = String(v).replace(/_/g, ' ')
+  const out = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === '(') depth++
+    else if (ch === ')') depth = Math.max(0, depth - 1)
+    else if (ch === ',' && depth === 0) { out.push(s.slice(start, i)); start = i + 1 }
+  }
+  out.push(s.slice(start))
+  return out.map((p) => p.trim()).filter(Boolean)
+}
+
 function shadowsMatch(found, lockValue, tolerance = tolerancePx) {
   const f = String(found).replace(/_/g, ' ')
   const l = String(lockValue)
@@ -414,6 +436,33 @@ function shadowsMatch(found, lockValue, tolerance = tolerancePx) {
 }
 
 const lockShadows = lockValues('shadows')
+const lockShadowLayers = lockShadows.flatMap(shadowLayers)
+
+// Bug 10: a raw-CSS shadow is authored by hand, so unlike a computed lock value
+// it can legally hold things this lint simply cannot resolve: relative lengths
+// (`0 0.5em 1em`), named/keyword colors (`black`, `currentColor`) which
+// parseColor() does not implement, or `calc()`. Every one of those makes
+// shadowsMatch() answer "no match" for a reason that has nothing to do with
+// drift — a guaranteed false positive. Detect them and fail SAFE, following the
+// same precedent as Bug H: this is consulted only AFTER isAllowed() has already
+// failed, so a value that genuinely matches the lock still passes cleanly.
+// Returns a note string (-> unverifiable[]) or null (-> verifiable as normal).
+const SHADOW_KEYWORDS = new Set(['inset'])
+const shadowAmbiguity = (value) => {
+  for (const layer of shadowLayers(value)) {
+    let rest = layer
+    const c = COLOR_TOKEN.exec(rest)
+    if (c) rest = rest.slice(0, c.index) + ' ' + rest.slice(c.index + c[0].length)
+    for (const t of rest.split(/\s+/).map((x) => x.trim()).filter(Boolean)) {
+      if (SHADOW_KEYWORDS.has(t.toLowerCase())) continue
+      if (toPx(t) !== null) continue // plain px/rem length — fully comparable
+      const unit = relativeUnitOf(t)
+      if (unit) return `shadow length uses a relative/contextual unit (${unit}), cannot verify against a static px-based lock`
+      return `shadow contains a token this lint cannot resolve to a px length or a parseable color (${t}), cannot verify against a static lock`
+    }
+  }
+  return null
+}
 
 // ---- allow check -----------------------------------------------------------
 // `underscoreAsSpace` is set by BOTH font rules. A Tailwind arbitrary value is
@@ -437,7 +486,15 @@ const isAllowed = (bucket, value, underscoreAsSpace = false) => {
 
   if (bucket === 'shadows') {
     if (allowed.shadows.has(norm(value))) return true
-    return lockShadows.some((lv) => shadowsMatch(value, lv))
+    if (lockShadows.some((lv) => shadowsMatch(value, lv))) return true
+    // Bug 10: layer-wise fallback. Every authored layer has to exist as a layer
+    // of SOME measured lock shadow. This can only ever WIDEN what passes (it
+    // runs after the whole-value comparison already failed), so it cannot turn
+    // a previously-clean value into a violation.
+    if (!lockShadowLayers.length) return false
+    const found = shadowLayers(value)
+    if (!found.length) return false
+    return found.every((layer) => lockShadowLayers.some((ll) => shadowsMatch(layer, ll)))
   }
 
   const v = norm(value)
@@ -532,9 +589,36 @@ const STYLE_COLOR = /:\s*['"`]?(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)|
 const STYLE_LEN = /(padding|margin|gap|top|left|right|bottom|width|height|fontSize|inset)[A-Za-z]*\s*:\s*['"`](-?[0-9.]+(?:px|rem|em|vh|vw|%))['"`]/g
 const STYLE_RADIUS = /borderRadius\s*:\s*['"`]([0-9.]+(?:px|rem|%))['"`]/g
 
-// Bug 8: raw CSS gets a colors-only rule set — Tailwind arbitrary-value syntax
-// does not apply to `:root { --brand: #123456 }`.
+// Bug 8: raw CSS gets its own rule set — Tailwind arbitrary-value syntax does
+// not apply to `:root { --brand: #123456 }`.
 const CSS_COLOR = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]+\)|hsla?\([^)]+\)|okl(?:ab|ch)\([^)]+\)/g
+
+// Bug 10: raw CSS used to be scanned for COLORS ONLY, so a hand-invented
+// `box-shadow: 0 4px 12px rgba(0,0,0,.15)` in a `section.css` was never compared
+// against the lock's `shadows` bucket at all — while the exact same drift
+// written as `shadow-[0_4px_12px_rgba(0,0,0,.15)]` was caught. (The color inside
+// it was checked, the geometry was not.) Same bucket, same lock, same
+// violation / `@clone-degraded:` / unverifiable machinery — just the other
+// syntax. Vendor prefixes included; `[^;{}]+` safely stops at the end of the
+// declaration and still spans the multi-line values these routinely have.
+//
+// Deliberately NOT covered: `filter: drop-shadow(...)`. The lock's shadows
+// bucket is built purely from computed `boxShadow` (see inspect.mjs), so it
+// holds no drop-shadow data whatsoever — checking one against the other would
+// manufacture a violation for every drop-shadow in the codebase.
+const CSS_SHADOW = /(?:^|[\s;{])(?:-webkit-|-moz-)?box-shadow\s*:\s*([^;{}]+)/gi
+
+// Shadow keywords that state "no shadow" / defer to the cascade. They name no
+// literal, so they are not drift and are skipped outright (not even counted) —
+// same precedent as NON_FAMILY_FONT_VALUES in the fonts rule.
+const CSS_SHADOW_SKIP = new Set(['none', 'inherit', 'initial', 'unset', 'revert', 'revert-layer'])
+
+// A `/* ... */` comment can contain anything, including a literal
+// `box-shadow: ...` inside a `@clone-degraded:` note explaining the drift.
+// Blank the comment BODIES out while preserving every byte offset, so the match
+// indices (and therefore the reported line numbers, and therefore the
+// degraded-marker lookback) stay exact.
+const blankComments = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
 
 const DEGRADED_MARKER = '@clone-degraded:'
 
@@ -584,7 +668,7 @@ const VAR_SHADOW_NOTE = 'shadow references a CSS variable, cannot verify against
 
 // `value` is always recorded AS AUTHORED so the report points at real source
 // text; `underscoreAsSpace` only affects the comparison.
-const record = (file, lines, offsets, bucket, value, index, underscoreAsSpace = false) => {
+const record = (file, lines, offsets, bucket, value, index, underscoreAsSpace = false, ambiguityNote = null) => {
   totalMatches++
   const line = lineOf(offsets, index)
   // Bug F: a var()-based shadow has nothing literal to compare — same
@@ -605,6 +689,14 @@ const record = (file, lines, offsets, bucket, value, index, underscoreAsSpace = 
     unverifiable.push({ file, line, bucket, value, note: relativeUnitNote(relUnit) })
     return
   }
+  // Bug 10: a compound value (a shadow) can be unresolvable for the same class
+  // of reason a bare `2em` is, but `relativeUnitOf` only inspects a value that
+  // is a single length end to end. The caller supplies the per-bucket verdict.
+  // Same ordering rule as above: consulted only after isAllowed() said no.
+  if (ambiguityNote) {
+    unverifiable.push({ file, line, bucket, value, note: ambiguityNote })
+    return
+  }
   if (isDegraded(lines, line)) degraded.push({ file, line, bucket, value, reason: degradeReason(lines, line) })
   else violations.push({ file, line, bucket, value, nearestAllowed: nearest(bucket, value) })
 }
@@ -619,6 +711,17 @@ for (const file of files) {
 
   if (isCss) {
     for (const m of text.matchAll(CSS_COLOR)) record(rel, lines, offsets, 'colors', m[0], m.index)
+    // Bug 10: shadows too — see CSS_SHADOW. Comment bodies are blanked (offsets
+    // preserved) so a `box-shadow:` written inside an explanatory comment is not
+    // mistaken for a declaration.
+    const scannable = blankComments(text)
+    for (const m of scannable.matchAll(CSS_SHADOW)) {
+      const value = norm(m[1].replace(/!\s*important/gi, ''))
+      if (!value || CSS_SHADOW_SKIP.has(value)) continue
+      // point at the property name, not the whitespace the regex had to consume
+      const at = m.index + Math.max(0, m[0].search(/\S/))
+      record(rel, lines, offsets, 'shadows', value, at, false, shadowAmbiguity(value))
+    }
     continue
   }
 

@@ -6,8 +6,34 @@
 # keep in sync. The printed diff is the feedback payload — paste it back into
 # the offending builder's context so it can re-request the change properly.
 #
-# Usage: tripwire-check.sh <root> <last-good-commit-ish>
-# Exit:  0 = no drift, 1 = drift found (files reverted), 2 = cannot check.
+# LOCK-STATE GUARD (why this script no longer reverts blindly)
+# A diff against the baseline cannot tell "a builder edited a file it must never
+# touch" apart from "the orchestrator is mid-reconcile and hasn't committed the
+# new baseline yet". Both look identical to git. The permission bits CAN tell
+# them apart: per the Shared-Scope Contract the three shared files are locked
+# (file 0444 + parent dir 0555) at every point where a tripwire check is a
+# legitimate operation, and are only writable while a reconcile is actively in
+# flight. So:
+#
+#   locked   + differs  -> revert automatically (the real tripwire case: a rogue
+#                          edit to a file that should have been immutable).
+#   unlocked + differs  -> REFUSE, warn loudly, change nothing. Reverting here
+#                          destroys legitimate in-progress reconcile work.
+#                          Override with --force once you are sure.
+#
+# This exists because it already happened: a tripwire run against a stale
+# pre-reconcile baseline silently reverted correct, uncommitted reconcile output
+# and reported it as a success.
+#
+# Usage: tripwire-check.sh [--force] <root> <last-good-commit-ish>
+#   --force  Revert even files that are currently unlocked. Skips ONLY the
+#            lock-state guard; a file still has to differ from the baseline to
+#            be touched at all.
+# Exit:  0 = no drift
+#        1 = drift found, everything reverted
+#        2 = cannot check (bad args / no repo / unresolvable baseline)
+#        3 = drift found but at least one file was REFUSED (unlocked): rerun
+#            against the correct up-to-date baseline, or with --force.
 
 set -uo pipefail
 
@@ -25,15 +51,41 @@ SHARED_FILES=(
 )
 
 usage() {
-  printf 'Usage: %s <root> <last-good-commit-ish>\n' "${0##*/}" >&2
+  cat >&2 <<EOF
+Usage: ${0##*/} [--force] <root> <last-good-commit-ish>
+
+Detects drift in the shared files (globals.css, layout.tsx, page.tsx) against a
+known-good commit and reverts it.
+
+  --force, -f   Also revert files that are currently UNLOCKED (writable).
+                By default an unlocked shared file is REFUSED rather than
+                reverted: writable means a reconcile is probably in flight and
+                the diff is legitimate uncommitted work, not a rogue edit.
+                --force skips that guard only — a file must still differ from
+                the baseline to be reverted.
+  -h, --help    Show this help.
+
+Exit: 0 no drift | 1 drift reverted | 2 cannot check | 3 drift refused (unlocked)
+EOF
   exit 2
 }
 
-[ "$#" -eq 2 ] || usage
-case "$1" in -h|--help) usage ;; esac
+FORCE=0
+ARGS=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)  usage ;;
+    -f|--force) FORCE=1; shift ;;
+    --)         shift; while [ "$#" -gt 0 ]; do ARGS+=("$1"); shift; done ;;
+    -*)         printf 'tripwire: unknown option: %s\n' "$1" >&2; usage ;;
+    *)          ARGS+=("$1"); shift ;;
+  esac
+done
 
-ROOT=$1
-BASE=$2
+[ "${#ARGS[@]}" -eq 2 ] || usage
+
+ROOT=${ARGS[0]}
+BASE=${ARGS[1]}
 
 if [ ! -d "$ROOT" ]; then
   printf 'tripwire: <root> is not a directory: %s\n' "$ROOT" >&2
@@ -126,6 +178,54 @@ mode_of() {
   stat -f '%OLp' -- "$1" 2>/dev/null || stat -c '%a' -- "$1" 2>/dev/null || printf ''
 }
 
+# True when any write bit (owner, group, or other) is set in an octal mode
+# string. Tolerates a leading setuid/sticky digit by looking at the last three.
+mode_has_write() {
+  local m=${1:-}
+  m=${m: -3}
+  [ "${#m}" -eq 3 ] || return 1
+  local d
+  for d in "${m:0:1}" "${m:1:1}" "${m:2:1}"; do
+    case "$d" in 2|3|6|7) return 0 ;; esac
+  done
+  return 1
+}
+
+# True when a shared file is NOT currently locked, i.e. somebody can still write
+# it. lock-shared.sh sets file 0444 + parent dir 0555; unlock-shared.sh sets
+# file 0644 + parent dir 0755. Either half being open counts as unlocked:
+#   - a writable file is the obvious case,
+#   - a writable parent dir is enough to rename or unlink over a 0444 file, and
+#     it is the FIRST thing unlock-shared.sh opens, so a half-applied unlock is
+#     still an active reconcile.
+# Deliberately biased toward reporting "unlocked": a false unlocked reading only
+# costs an extra confirmation, a false locked reading destroys real work.
+is_unlocked() {
+  local file=$1
+  local abs="$ROOT/$file"
+
+  if [ -e "$abs" ] && mode_has_write "$(mode_of "$abs")"; then
+    return 0
+  fi
+
+  # The parent dir is only half of the lock for dir-locked manifest entries;
+  # for anything else its mode says nothing about the file's lock state.
+  if is_dir_locked "$file" && mode_has_write "$(mode_of "$(dirname -- "$abs")")"; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Human-readable "0444 file / 0555 dir" summary for the warning block.
+lock_state_desc() {
+  local abs="$ROOT/$1"
+  local fmode pmode
+  fmode=$(mode_of "$abs"); [ -n "$fmode" ] || fmode='missing'
+  pmode=$(mode_of "$(dirname -- "$abs")"); [ -n "$pmode" ] || pmode='missing'
+  printf 'file mode %s, parent dir mode %s' "$fmode" "$pmode"
+}
+
 # Revert one file to $BASE, opening the POSIX lock only for the duration of the
 # checkout and restoring the exact prior modes afterwards.
 revert_file() {
@@ -170,8 +270,11 @@ printf '=== SHARED-FILE TRIPWIRE TRIPPED ===\n'
 printf 'baseline: %s\n' "$BASE"
 printf 'root    : %s\n\n' "$ROOT"
 
+[ "$FORCE" -eq 1 ] && printf '%s\n\n' '--force: lock-state guard disabled, unlocked files will be reverted too.'
+
 reverted=()
 failed=()
+refused=()
 
 # Check and revert every file before reporting. Bailing on the first violation
 # would hide the rest and force a second round-trip.
@@ -182,6 +285,31 @@ while IFS= read -r file; do
   printf 'Diff vs last-good state (paste this back to the responsible builder):\n\n'
   git -C "$ROOT" diff "$BASE" -- "$file"
   printf '\n'
+
+  # --------------------------------------------------- lock-state guard ---
+  # A writable shared file means the lock is currently open, which per the
+  # Shared-Scope Contract only happens during an active reconcile. The diff is
+  # then almost certainly legitimate uncommitted work, not drift, so reverting
+  # it would delete exactly what the operator is in the middle of producing.
+  if [ "$FORCE" -eq 0 ] && is_unlocked "$file"; then
+    refused+=("$file")
+    printf '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+    printf '!! REVERT REFUSED — %s IS CURRENTLY UNLOCKED\n' "$file"
+    printf '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+    printf 'Current state: %s (locked would be 0444 file / 0555 dir).\n' "$(lock_state_desc "$file")"
+    printf 'An unlocked shared file means a RECONCILE IS PROBABLY IN FLIGHT.\n'
+    printf 'The diff above is then legitimate work that has not been committed as\n'
+    printf 'the new baseline yet, and auto-reverting it would destroy it for good.\n'
+    printf 'Nothing was changed on disk for this file.\n\n'
+    printf 'Do one of these:\n'
+    printf '  (a) Finish the reconcile, re-lock, commit the new baseline\n'
+    printf '      (git add -A && git commit -m %s), then re-run this check\n' "'chore: post-reconcile baseline'"
+    printf '      against THAT commit — not the stale %s.\n' "$BASE"
+    printf '  (b) If you are certain this really is an unauthorised edit, re-run\n'
+    printf '      with --force:\n'
+    printf '        %s --force %s %s\n\n' "${0##*/}" "$ROOT" "$BASE"
+    continue
+  fi
 
   if revert_file "$file"; then
     reverted+=("$file")
@@ -206,8 +334,21 @@ if [ "${#failed[@]}" -gt 0 ]; then
   for file in "${failed[@]}"; do printf '  - %s\n' "$file"; done
 fi
 
+if [ "${#refused[@]}" -gt 0 ]; then
+  printf 'files REFUSED — unlocked, left untouched (%d):\n' "${#refused[@]}"
+  for file in "${refused[@]}"; do printf '  - %s\n' "$file"; done
+fi
+
 printf '\nAction: the shared files are owned by the reconcile step. Send the diff\n'
 printf 'above back to the builder that produced it and have it re-request the\n'
 printf 'change in its completion message instead of editing directly.\n'
+
+if [ "${#refused[@]}" -gt 0 ]; then
+  printf '\nNOTE: %d file(s) were left alone because they are unlocked. Verify the\n' "${#refused[@]}"
+  printf 'baseline %s is actually current before doing anything else — a stale\n' "$BASE"
+  printf 'baseline is the usual reason this guard fires. Re-run with --force only\n'
+  printf 'if you have confirmed the change is genuinely unauthorised.\n'
+  exit 3
+fi
 
 exit 1

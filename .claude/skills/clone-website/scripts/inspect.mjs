@@ -17,6 +17,7 @@
  *   tokens     <url>                    [--responsive] [--width N|--mobile] [--min-count N] [--top N]
  *   motion-check <url> "<css-selector>" [--width N|--mobile] [--wait MS] [--duration MS]
  *                                       [--samples N] [--props a,b,c]
+ *                                       [--no-scroll|--at-current-scroll] [--scroll Y]
  *
  * tokens --responsive is the RECOMMENDED way to build a token lock. A lock built
  * from the desktop viewport alone is incomplete: values that only exist at mobile
@@ -33,9 +34,22 @@
  * requestAnimationFrame loop begins (hydration, video preload, lazy JS), so a
  * continuously-rotating carousel reads as byte-identical and therefore "static".
  * motion-check instead does ONE page load, waits a generous settle (default
- * 3000ms) for JS to boot, then takes N samples spaced across a long observation
- * window (default 5 samples over 8000ms) and diffs consecutive samples.
- * No scroll, no hover, no click is applied during the window.
+ * 3000ms) for JS to boot, scrolls the target into view, waits a short settle for
+ * any entry trigger to fire, then takes N samples spaced across a long
+ * observation window (default 5 samples over 8000ms) and diffs consecutive
+ * samples. No hover and no click is applied, and nothing scrolls DURING the
+ * window — the one scroll happens before sampling starts.
+ *
+ * That pre-sample scrollIntoView is not optional politeness, it is the fix for a
+ * demonstrated false negative. Scroll-triggered motion (GSAP ScrollTrigger, an
+ * IntersectionObserver-gated rAF loop) does not start until the element enters
+ * the viewport. Sampling at whatever scroll position the page happened to load
+ * at therefore reported a genuinely-animating element as `animating: false`,
+ * purely because it sat below the fold and its trigger had never fired. Scroll
+ * into view first, and the same element reports true.
+ * Opt out with --no-scroll (alias --at-current-scroll) when you specifically
+ * want the element measured at the page's initial scroll position, or pass an
+ * explicit --scroll Y to park the page at a chosen offset instead.
  *
  * Flags:
  *   --width N      viewport width (default 1440; ignored with --mobile)
@@ -52,6 +66,14 @@
  *                  minimum 2) — 5 over 8000ms is one sample every ~2s
  *   --props a,b,c  motion-check only: comma-separated camelCase CSS properties to
  *                  watch (default transform,opacity,backgroundPosition)
+ *   --no-scroll    motion-check only (alias --at-current-scroll): do NOT scroll
+ *                  the target into view before sampling. Default is to scroll it
+ *                  into view, because scroll-triggered animations never start
+ *                  while the element is off-screen. Use this only when you
+ *                  deliberately want the element measured at the page's initial
+ *                  scroll position. Overrides --scroll if both are passed.
+ *                  With motion-check, --scroll Y parks the page at Y instead of
+ *                  scrolling the element into view.
  *   --full         full-page screenshot (screenshot only)
  *   --timeout MS   navigation timeout (default 60000)
  *   --min-count N  tokens only: drop values seen fewer than N times (default 2).
@@ -88,9 +110,38 @@ for (let i = 0; i < rest.length; i++) {
 const N = (v, d) => (v === undefined || v === true ? d : Number(v))
 const die = (msg, code = 1) => { console.error(msg); process.exit(code) }
 
+// Pause after motion-check scrolls the target into view, before the first sample.
+// A ScrollTrigger/IntersectionObserver callback fires on the next frame or two,
+// and the animation it starts needs a moment more to produce a measurable delta,
+// so sampling instantly after the scroll can still read the pre-animation value.
+// 800ms deliberately matches the post-scroll settle applyActions() uses for every
+// other subcommand (the default --wait), so "how long does this tool wait after a
+// scroll before reading" has exactly one answer across the whole file.
+const MOTION_SCROLL_SETTLE_MS = 800
+
 const COMMANDS = ['screenshot', 'extract', 'assets', 'download', 'topology', 'tokens', 'motion-check']
+const USAGE = `Usage: inspect.mjs <${COMMANDS.join('|')}> <url> [args] [--flags]
+
+  screenshot   <url> <out.png> [--full] [--width N|--mobile] [--scroll Y] [--hover SEL] [--click SEL] [--wait MS]
+  extract      <url> "<css-selector>" [--width N|--mobile] [--scroll Y] [--hover SEL] [--click SEL] [--wait MS]
+  assets       <url> [--width N|--mobile]
+  download     <url> <outdir> [--width N|--mobile]
+  topology     <url> [--width N|--mobile]
+  tokens       <url> [--responsive] [--width N|--mobile] [--min-count N] [--top N]
+  motion-check <url> "<css-selector>" [--width N|--mobile] [--wait MS] [--duration MS]
+                     [--samples N] [--props a,b,c] [--no-scroll|--at-current-scroll] [--scroll Y]
+
+motion-check answers "is this element moving on its own?". By DEFAULT it scrolls
+the target into view before sampling, then waits ${MOTION_SCROLL_SETTLE_MS}ms for any entry trigger
+to fire. Without that, scroll-triggered motion (GSAP ScrollTrigger,
+IntersectionObserver-gated loops) never starts and the element is wrongly
+reported as static.
+  --no-scroll / --at-current-scroll  sample at the page's initial scroll
+                                     position instead (overrides --scroll)
+  --scroll Y                         park the page at offset Y instead of
+                                     scrolling the element into view`
 if (!cmd || !COMMANDS.includes(cmd)) {
-  die(`Usage: inspect.mjs <${COMMANDS.join('|')}> <url> [args] [--flags]`, 2)
+  die(USAGE, 2)
 }
 const url = positional[0]
 if (!url) die('Error: <url> is required', 2)
@@ -113,6 +164,10 @@ const MOTION_DEFAULT_PROPS = ['transform', 'opacity', 'backgroundPosition']
 const motionProps = typeof flags.props === 'string'
   ? flags.props.split(',').map((p) => p.trim()).filter(Boolean)
   : MOTION_DEFAULT_PROPS
+// Scroll-into-view is the DEFAULT for motion-check; --no-scroll (or the more
+// explicit alias --at-current-scroll) is the opt-out for callers who really do
+// want the element measured wherever the page happens to load.
+const motionNoScroll = !!flags['no-scroll'] || !!flags['at-current-scroll']
 
 // ---- in-page functions (serialized into the browser) -----------------------
 // These must be fully self-contained (no closure over Node-side variables).
@@ -374,9 +429,30 @@ try {
   } else if (cmd === 'motion-check') {
     const selector = positional[1]
     if (!selector) die('Error: motion-check needs a <css-selector>', 2)
-    // NOTE: no applyActions() here on purpose. This measures self-driven motion,
-    // so nothing may scroll, hover or click during the observation window.
-    // The post-goto `settle` above already served as the hydration wait.
+    // NOTE: still no applyActions() here — no hover, no click, and nothing moves
+    // DURING the observation window; that is what keeps this a measurement of
+    // self-driven motion. The post-goto `settle` above served as the hydration
+    // wait. What DOES happen first, exactly once, is a scroll to bring the target
+    // into the viewport, because a scroll-triggered animation (ScrollTrigger,
+    // IntersectionObserver-gated rAF) never starts while the element is off-screen
+    // — sampling it where the page happened to load reports real motion as static.
+    let scrollMode = 'none'
+    if (!motionNoScroll) {
+      if (flags.scroll !== undefined) {
+        // Explicit --scroll Y wins over auto scroll-into-view: the caller has
+        // named the exact page offset they want the element observed at.
+        await page.evaluate((y) => window.scrollTo(0, y), N(flags.scroll, 0))
+        scrollMode = 'explicit'
+      } else {
+        // scrollIntoViewIfNeeded is a no-op when the element is already visible,
+        // so the common case costs nothing but the settle below.
+        await page.locator(selector).first().scrollIntoViewIfNeeded({ timeout: navTimeout })
+          .catch(() => {})
+        scrollMode = 'intoView'
+      }
+      // Let the trigger fire and the animation actually get moving before sample 0.
+      await page.waitForTimeout(MOTION_SCROLL_SETTLE_MS)
+    }
     const gap = motionDuration / (motionSamples - 1)
     const samples = []
     for (let i = 0; i < motionSamples; i++) {
@@ -406,6 +482,12 @@ try {
         selector,
         watchedProperties: motionProps,
         settleMs: settle,
+        // Recorded so an `animating: false` result is self-explaining: "none"
+        // means the element was never scrolled into view, which is the one
+        // condition under which a false negative for scroll-triggered motion is
+        // still expected.
+        scrollMode,
+        scrollSettleMs: scrollMode === 'none' ? 0 : MOTION_SCROLL_SETTLE_MS,
         requestedDurationMs: motionDuration,
         samples: samples.map((s) => ({ atMs: s.t - t0, found: s.found, ...s.values })),
       }, null, 2))
