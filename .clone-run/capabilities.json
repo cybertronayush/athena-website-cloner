@@ -1,6 +1,0 @@
-{
-  "permissions_enforced": true,
-  "mechanism": "posix-lock",
-  "checked_at": "2026-08-02T13:22:15Z",
-  "detail": "both vectors blocked (direct write rc=1, temp-rename rc=1) by file 0444 + dir 0555"
-}

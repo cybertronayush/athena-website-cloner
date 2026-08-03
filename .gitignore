@@ -47,3 +47,6 @@ next-env.d.ts
 
 # Local temp files
 temp/
+
+# Clone run diagnostics (written by the permission-canary script)
+.clone-run/

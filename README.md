@@ -63,20 +63,48 @@ Asking "is this element animating on its own?" by taking two short snapshots and
 
 `inspect.mjs motion-check` exists for that question specifically: one page load, a generous settle for JS to boot, then N evenly-spaced samples of `transform` / `opacity` / `backgroundPosition` across a long observation window (default 5 samples over 8 seconds), reporting which properties actually changed. This blind spot is not hypothetical. It was hit on a real target, and it is the reason the tool has a separate command for it.
 
+## Requirements
+
+- **Node.js 24 or newer.** `package.json` sets `engines: { node: ">=24" }` and `.nvmrc` pins `24`. Run `nvm use` if you have nvm.
+- **npm.** The repo ships a `package-lock.json`. pnpm and yarn are untested here.
+- **git.** The tripwire layer diffs against real git history, so the working tree has to be a git repo. A `git clone` of this repo already is one.
+- **bash and POSIX file permissions.** The shared-file lock is plain shell (`lock-shared.sh` and friends). macOS and Linux work as-is; on Windows, use WSL.
+- **An AI coding agent.** `/clone-website` is a prompt that an agent executes, not a CLI. You bring your own agent and its account or API key. See [Supported agents](#supported-agents).
+- **Network access and roughly 150 MB of disk** for the Chromium build Playwright downloads.
+
+The extraction scripts themselves need no accounts, API keys or hosted services. `inspect.mjs` drives a local Chromium and nothing else.
+
 ## Quick start
 
-Requires Node 24+.
-
-**1. Install the browser helper's dependencies** (once):
+**1. Clone the repo and install the app's dependencies.**
 
 ```bash
-cd .claude/skills/clone-website/scripts
-npm install && npx playwright install chromium
+git clone https://github.com/cybertronayush/athena-website-cloner.git
+cd athena-website-cloner
+npm install
 ```
 
-**2. Make the skill visible to your agent.** `.claude/skills/clone-website/` is the canonical copy, carrying `SKILL.md`, `scripts/` and the `scaffold/`. The `.codex/`, `.github/` and `.opencode/` copies are generated from it by `node scripts/sync-skills.mjs`.
+**2. Install the browser helper's dependencies.** This is a second, separate install, and skipping it is the most common way a first run fails.
 
-**3. Run it** against one or more targets. **This is not a terminal command — type it directly to your AI coding agent** (Claude Code, Cursor, OpenCode, etc.), the same way you'd type any other instruction to it:
+```bash
+S=.claude/skills/clone-website/scripts
+npm install --prefix "$S"
+npm --prefix "$S" exec -- playwright install chromium
+```
+
+(The `--prefix` matters. `npx playwright` from the repo root would miss the pinned local copy and pull a different one from the registry.)
+
+`.claude/skills/clone-website/scripts/` carries its own `package.json`, because Playwright is a dependency of the extraction helper and not of the Next.js app. Its `node_modules/` is gitignored, so a fresh clone never has it. Without this step `inspect.mjs` fails on a missing Playwright or a missing Chromium, and the pipeline can't extract anything.
+
+Confirm it works before going further:
+
+```bash
+node .claude/skills/clone-website/scripts/inspect.mjs topology https://example.com
+```
+
+That should print a JSON topology of the page. If it does, extraction is good.
+
+**3. Open the repo in your AI coding agent and run the pipeline.** **This is not a terminal command — type it directly to the agent**, the same way you'd type any other instruction to it:
 
 ```
 /clone-website <url> [<url2> ...]
@@ -84,12 +112,60 @@ npm install && npx playwright install chromium
 
 That block is a slash-command / agent prompt, not shell syntax. Pasting it into a terminal does nothing. (See **[Commands (inside a generated clone project)](#commands-inside-a-generated-clone-project)** below for how to actually view what gets built — `npm run dev` — once sections exist.)
 
-The skill bootstraps a fresh Next.js scaffold in your target directory (`scaffold/` is copied during Pre-Flight), verifies the tree is a git repo (the tripwire needs history to diff against), confirms the target is reachable and not blocking headless browsers, then walks the five phases. Multiple URLs get isolated artifacts under `docs/research/<hostname>/`.
+Run the agent with this repo as its working directory. The skill resolves its own directory from the git root (`<repo>/.claude/skills/clone-website`), so from anywhere else it won't find `scripts/` unless you point `CLONE_WEBSITE_SKILL_DIR` at that path.
+
+During Pre-Flight the skill verifies the tree is a git repo (the tripwire needs history to diff against), confirms the target is reachable and not blocking headless browsers, then walks the five phases. Multiple URLs get isolated artifacts under `docs/research/<hostname>/`.
+
+One thing to know about where it builds: if the current directory is already a Next.js scaffold, the skill builds **in place**. The repo root is one, and it still holds the Bending Spoons example below, so a clone run started at the root builds alongside that example. If you want a clean tree, either tell the agent a fresh target directory to bootstrap into (it copies `.claude/skills/clone-website/scaffold/` there and runs `npm install`), or clear out `src/sections/`, `docs/research/` and `public/images/` first.
+
+## Supported agents
+
+The pipeline lives in one place — `.claude/skills/clone-website/`, which carries `SKILL.md`, `scripts/` and `scaffold/`. `node scripts/sync-skills.mjs` regenerates the per-platform command files from that single `SKILL.md`:
+
+| Agent | Command file |
+| --- | --- |
+| Claude Code | `.claude/skills/clone-website/SKILL.md` (source of truth) |
+| Codex CLI | `.codex/skills/clone-website/SKILL.md` |
+| GitHub Copilot | `.github/skills/clone-website/SKILL.md` |
+| Cursor | `.cursor/commands/clone-website.md` |
+| Windsurf | `.windsurf/workflows/clone-website.md` |
+| Gemini CLI | `.gemini/commands/clone-website.toml` |
+| opencode | `.opencode/commands/clone-website.md` |
+| Augment Code | `.augment/commands/clone-website.md` |
+| Continue | `.continue/commands/clone-website.md` |
+| Amazon Q | `.amazonq/cli-agents/clone-website.json` |
+
+Most of these expose it as `/clone-website`; Amazon Q ships it as a CLI agent definition rather than a slash command. The generated copies contain the prompt text only — `scripts/` and `scaffold/` are never duplicated, so the Playwright install in step 2 is the same path no matter which agent you use.
+
+Edit `SKILL.md` and re-run `node scripts/sync-skills.mjs`; don't edit the generated files.
+
+## What a run produces
+
+Artifacts land in predictable places, so you can audit a run rather than trust it:
+
+```
+docs/research/            # tokens.lock.json, BEHAVIORS.md, PAGE_TOPOLOGY.md,
+                          #   components/<name>.spec.md, DEGRADATIONS.md
+docs/design-references/   # full-page screenshots, desktop and mobile
+public/images|videos|seo/ # assets downloaded from the target
+src/sections/<name>/      # one folder per section: component + section.meta.json
+src/components/icons/     # one file per extracted icon + generated barrel
+src/app/                  # globals.css, layout.tsx, page.tsx (regenerated by codegen)
+```
+
+Then check the result yourself:
+
+```bash
+npm run dev      # http://localhost:3000
+npm run check    # lint + typecheck + build — the go/no-go on a finished clone
+```
+
+`npm run check` is the honest verification step. A clone that doesn't pass it isn't done.
 
 The scripts also run standalone, with no agent involved:
 
 ```bash
-S=.claude/skills/clone-website/scripts
+S=.claude/skills/clone-website/scripts   # after the step-2 install
 
 node $S/inspect.mjs topology  https://example.com
 node $S/inspect.mjs screenshot https://example.com out.png --full --mobile
@@ -130,12 +206,17 @@ The remaining sections (header, Products, Proprietary technologies, Interviews, 
     permission-canary.sh# Self-test: does the lock actually block writes?
     tripwire-check.sh   # git-diff detect-and-revert backstop
     distill-motion.mjs  # Optional: raw motion-corpus dump for hand curation
+    package.json        # Playwright lives here, not in the app — install separately
   scaffold/             # The Next.js 16 base copied into new clone projects
   references/           # Inspection guide
 
+.codex/ .github/ .cursor/ .windsurf/ .gemini/ .opencode/ .augment/ .continue/
+.amazonq/               # Generated per-agent command files (prompt text only)
+scripts/sync-skills.mjs # Regenerates all nine from SKILL.md
+
 src/                    # The current example build
   sections/<name>/      # One folder per section: component + meta + scoped css
-  components/icons/     # One file per icon, generated barrel
+  components/icons/     # One file per icon + generated barrel (created by a run)
   app/                  # globals.css, layout.tsx, page.tsx (the shared three)
 docs/research/          # Extraction artifacts: token lock, specs, degradations
 docs/design-references/ # Screenshots
@@ -164,6 +245,12 @@ npm run check       # lint + typecheck + build
 npm run lint:tokens # Token containment check against the lock
 ```
 
+`lint:tokens` ships in the scaffold's `package.json`, so it exists in projects bootstrapped from it. This repo's own root `package.json` doesn't define it — run the linter directly here:
+
+```bash
+node .claude/skills/clone-website/scripts/token-lint.mjs docs/research/tokens.lock.json src
+```
+
 ## Honest limitations
 
 Pixel-perfection is the target, not a guarantee.
@@ -176,6 +263,20 @@ The shared-file lock is same-UID POSIX. It stops normal edits and common bypasse
 
 Clone only sites you are authorized to replicate. Logos, brand assets and copy belong to their owners.
 
+## Troubleshooting
+
+**`Cannot find package 'playwright'` / `Executable doesn't exist`** — step 2 of the Quick start was skipped or only half-done. Run both lines — the npm install and the `playwright install chromium`.
+
+**`clone-website skill not found`** — the agent isn't running with this repo as its working directory. Either `cd` into the repo first, or set `CLONE_WEBSITE_SKILL_DIR` to the absolute path of `.claude/skills/clone-website`.
+
+**`npm install` warns about the Node engine** — you're below Node 24. `nvm use` picks up `.nvmrc`.
+
+**`codegen.mjs` says "run unlock-shared.sh first"** — the shared files are still POSIX-locked from a dispatch batch. `bash .claude/skills/clone-website/scripts/unlock-shared.sh .`
+
+**A finished project is read-only and you can't edit or delete it** — the final unlock at the end of Phase 5 didn't run. Same command as above.
+
+**The target won't load** — some sites block headless browsers. `inspect.mjs topology <url>` doubles as the reachability check; if it fails there, the site may be uncloneable.
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT, with dual attribution: original work © 2025 JCodesMore, modifications and additions © 2026 Ayush Singh (madmethod.io). See [LICENSE](LICENSE) for the full text.
