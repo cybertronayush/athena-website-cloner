@@ -21,7 +21,11 @@
  *                             "importPath": "<path relative to src/app/page.tsx>" }
  *
  *   src/components/icons/
- *     <IconName>.tsx        one self-contained named export per file
+ *     <IconName>.tsx        one self-contained named export per file (barrelled)
+ *
+ *   src/sections/<section-name>/icons/
+ *     <IconName>.tsx        section-private icons; not barrelled, but checked
+ *                           for export-name collisions against every other icon
  *
  * Generated artifacts
  * -------------------
@@ -34,9 +38,12 @@
  *
  * Validation (soft; WARN without `--check`, FATAL with `--check`)
  *   - two sections claiming the same `order` slot
- *   - two icon files exporting the same name
+ *   - two icon files exporting the same name (shared OR section-local)
  *   - a `section.css` containing `:root` or `@theme` (design tokens are frozen
  *     earlier in the pipeline; sections may only add scoped component rules)
+ *   - the same top-level selector declared by two different `section.css` files:
+ *     they share one `layer(components)` cascade, so the alphabetically-last
+ *     `@import` silently wins and the other section loses its rule
  *
  * Validation (hard; FATAL in every mode — the run writes nothing)
  *   - `src/components/icons.tsx` still exists (retired; it shadows the
@@ -44,6 +51,10 @@
  *   - malformed / missing `section.meta.json`, i.e. any of the three required
  *     fields (`order`, `componentName`, `importPath`) missing or wrong-typed.
  *     Dropping such a section would silently delete it from `page.tsx`.
+ *   - a section component that `import`s its own `./section.css`. codegen already
+ *     imports it into globals.css inside `layer(components)`; the component-level
+ *     import ships a second UNLAYERED copy, which beats every Tailwind utility
+ *     used in that same section regardless of specificity.
  *   - a generated target is not writable (locked). All targets are checked
  *     before the first write, so a run is all-or-nothing, never partial.
  *
@@ -196,7 +207,28 @@ function loadSections() {
 
     const cssPath = join(dir, 'section.css')
     const hasCss = existsSync(cssPath) && statSync(cssPath).isFile()
-    if (hasCss) lintSectionCss(cssPath)
+    if (hasCss) {
+      lintSectionCss(cssPath, name)
+
+      // codegen already `@import`s this section.css into globals.css inside
+      // `layer(components)`. A component-level `import "./section.css"` ships a
+      // SECOND, UNLAYERED copy — and unlayered CSS beats every `@layer utilities`
+      // rule regardless of specificity, so the duplicate silently overrides the
+      // Tailwind utilities used in this very section's JSX. Always fatal.
+      for (const f of readDirSafe(dir)) {
+        if (!f.isFile() || extname(f.name) !== '.tsx') continue
+        const src = stripComments(readFileSync(join(dir, f.name), 'utf8'))
+        if (/import\s+['"]\.\/section\.css['"]/.test(src)) {
+          problem(
+            'css-double-import',
+            `${rel(dir)}/${f.name}`,
+            'imports ./section.css directly. codegen already imports it into globals.css inside layer(components); ' +
+              'a component-level import ships it a second time UNLAYERED, where it beats every Tailwind utility. Remove the import.',
+            true,
+          )
+        }
+      }
+    }
 
     out.push({
       name,
@@ -219,11 +251,69 @@ function loadSections() {
     }
   }
 
+  // Every section.css lands in the same `layer(components)` cascade, so the same
+  // selector declared by two sections is a silent cross-section override: last
+  // `@import` alphabetically wins and the other section quietly loses its rule.
+  for (const [selector, owners] of [...cssSelectorOwners.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (owners.size > 1) {
+      problem(
+        'duplicate-class-selector',
+        'src/sections',
+        `selector \`${selector}\` declared by ${[...owners].sort().join(', ')} — every section.css shares one layer(components) cascade, ` +
+          'so the alphabetically-last @import silently wins. Prefix section selectors with the section name to keep them scoped.',
+      )
+    }
+  }
+
   return out
 }
 
+/** selector → Set<section name> across every section.css, for collision detection. */
+const cssSelectorOwners = new Map()
+
+/** Selectors that are legitimately shared / already policed elsewhere. */
+const SELECTOR_COLLISION_IGNORE = new Set([':root', '*', 'html', 'body', 'from', 'to'])
+
+/**
+ * Shallow top-level selector scan. Walks braces so rules wrapped in at-rules
+ * (`@layer components { ... }`, `@media { ... }`) still count as top-level, while
+ * nested rules inside another style rule are skipped. Not a real CSS parser —
+ * same rigor level as the `:root`/`@theme` checks above.
+ */
+function topLevelSelectors(src) {
+  const out = new Set()
+  /** @type {('at'|'rule')[]} */
+  const stack = []
+  let buf = ''
+  for (const ch of src) {
+    if (ch === '{') {
+      const prelude = buf.trim()
+      buf = ''
+      if (prelude.startsWith('@')) {
+        stack.push('at')
+        continue
+      }
+      const nested = stack.includes('rule')
+      stack.push('rule')
+      if (nested) continue
+      for (const part of prelude.split(',')) {
+        const sel = part.trim().replace(/\s+/g, ' ')
+        if (sel && !SELECTOR_COLLISION_IGNORE.has(sel)) out.add(sel)
+      }
+    } else if (ch === '}') {
+      stack.pop()
+      buf = ''
+    } else if (ch === ';') {
+      buf = ''
+    } else {
+      buf += ch
+    }
+  }
+  return [...out]
+}
+
 /** Sections may only add scoped component rules — token layers are frozen. */
-function lintSectionCss(cssPath) {
+function lintSectionCss(cssPath, sectionName) {
   const src = stripComments(readFileSync(cssPath, 'utf8'))
   src.split('\n').forEach((line, i) => {
     if (/(^|[\s,{}>+~])(:root)\b/.test(line)) {
@@ -233,6 +323,11 @@ function lintSectionCss(cssPath) {
       problem('css-token-rule', `${rel(cssPath)}:${i + 1}`, 'section.css may not declare `@theme` — design tokens are frozen; use scoped `@layer components` rules')
     }
   })
+
+  for (const sel of topLevelSelectors(src)) {
+    if (!cssSelectorOwners.has(sel)) cssSelectorOwners.set(sel, new Set())
+    cssSelectorOwners.get(sel).add(sectionName)
+  }
 }
 
 // ---- discovery: icons ------------------------------------------------------
@@ -258,14 +353,50 @@ function parseExportNames(src) {
   return [...names].sort()
 }
 
+/**
+ * Section-local icon modules: `src/sections/<section>/icons/<IconName>.tsx`.
+ * They are NOT barrelled (they stay private to their section), but they are fed
+ * through the same duplicate-export map as the shared icons. Without this, two
+ * builders each dropping an `ArrowIcon` into their own section are never compared
+ * against each other — the collision only surfaces later, by hand.
+ */
+function loadSectionIcons() {
+  const out = []
+  if (!existsSync(SECTIONS_DIR)) return out
+
+  for (const section of readDirSafe(SECTIONS_DIR)) {
+    if (!section.isDirectory()) continue
+    const iconsDir = join(SECTIONS_DIR, section.name, 'icons')
+    if (!existsSync(iconsDir) || !statSync(iconsDir).isDirectory()) continue
+
+    const files = readDirSafe(iconsDir)
+      .filter((e) => e.isFile() && extname(e.name) === '.tsx')
+      .map((e) => e.name)
+      .sort()
+
+    for (const file of files) {
+      const full = join(iconsDir, file)
+      const names = parseExportNames(readFileSync(full, 'utf8'))
+      if (names.length === 0) {
+        problem('icon-no-export', rel(full), 'no named export found — icons must expose a self-contained named export')
+        continue
+      }
+      out.push({ file, label: rel(full), stem: basename(file, '.tsx'), names })
+    }
+  }
+
+  return out
+}
+
 function loadIcons() {
   const out = []
-  if (!existsSync(ICONS_DIR)) return out
 
-  const files = readDirSafe(ICONS_DIR)
-    .filter((e) => e.isFile() && extname(e.name) === '.tsx')
-    .map((e) => e.name)
-    .sort()
+  const files = existsSync(ICONS_DIR)
+    ? readDirSafe(ICONS_DIR)
+        .filter((e) => e.isFile() && extname(e.name) === '.tsx')
+        .map((e) => e.name)
+        .sort()
+    : []
 
   for (const file of files) {
     const full = join(ICONS_DIR, file)
@@ -275,20 +406,22 @@ function loadIcons() {
       problem('icon-no-export', rel(full), 'no named export found — icons must expose a self-contained named export')
       continue
     }
-    out.push({ file, stem, names })
+    out.push({ file, label: rel(full), stem, names })
   }
 
-  // duplicate export names across files
+  // duplicate export names across files — shared icons AND section-local icons
+  // share one namespace here, so same-name clashes are caught wherever they live.
   const owners = new Map()
-  for (const icon of out) {
+  for (const icon of [...out, ...loadSectionIcons()]) {
     for (const n of icon.names) {
       if (!owners.has(n)) owners.set(n, [])
-      owners.get(n).push(icon.file)
+      owners.get(n).push(icon.label)
     }
   }
   for (const [name, files_] of [...owners.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     if (files_.length > 1) {
-      problem('duplicate-icon-export', 'src/components/icons', `export "${name}" declared by ${files_.sort().join(', ')} — icon export names must be unique`)
+      const scope = files_.every((f) => f.startsWith('src/components/icons/')) ? 'src/components/icons' : 'src'
+      problem('duplicate-icon-export', scope, `export "${name}" declared by ${files_.sort().join(', ')} — icon export names must be unique`)
     }
   }
 
@@ -472,9 +605,9 @@ if (problems.length > 0) {
 
 if (fatals.length > 0 && !check) {
   console.error(
-    `codegen: ${fatals.length} fatal section metadata problem${fatals.length === 1 ? '' : 's'} — refusing to generate a page.tsx that silently omits a section.`,
+    `codegen: ${fatals.length} fatal problem${fatals.length === 1 ? '' : 's'} — refusing to generate artifacts that would silently drop a section or break its cascade.`,
   )
-  console.error('codegen: nothing was written — fix the section.meta.json file(s) above and re-run.')
+  console.error('codegen: nothing was written — fix the file(s) above and re-run.')
   process.exit(1)
 }
 

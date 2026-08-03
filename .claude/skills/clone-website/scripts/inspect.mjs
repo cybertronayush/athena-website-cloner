@@ -88,11 +88,30 @@
  *                  Output shape is identical to the single-viewport form.
  *                  Omitting the flag keeps the old single-viewport behaviour.
  *
+ * extract and topology tag any element that a real visitor cannot see with
+ * `visuallyHidden: true` (display:none, visibility:hidden, opacity:0, off-screen
+ * absolute/fixed positioning, sr-only clipping). The field is emitted only when
+ * true. This matters because the pipeline pipes live-site text verbatim into
+ * spec files that a builder agent later reads as "copy to reproduce" — hidden
+ * text is precisely where a hostile page would plant instructions aimed at that
+ * agent. The flag does not filter anything; it marks a string as untrusted so
+ * the orchestrator treats it with suspicion instead of reproducing it as real
+ * site content.
+ *
+ * download enforces network guards on every asset: http/https only (plus
+ * size-capped data: URIs, which are decoded and written), rejection of any URL
+ * resolving to a private, loopback or link-local address (SSRF), a 50MB per-
+ * asset byte cap checked against Content-Length AND against bytes actually
+ * streamed, and hand-followed redirects so every hop is re-checked. Every guard
+ * is per-asset and non-fatal: a rejected URL becomes a manifest entry with
+ * `skipped: true` and a `reason`, never an exception that aborts the run.
+ *
  * Resolves `playwright` from this script's own node_modules.
  */
 import { chromium } from 'playwright'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
+import { lookup as dnsLookup } from 'node:dns/promises'
 
 // ---- arg parsing -----------------------------------------------------------
 const [, , cmd, ...rest] = process.argv
@@ -191,6 +210,60 @@ function pageExtract(selector) {
   const el = document.querySelector(selector)
   if (!el) return { error: 'Element not found: ' + selector }
   const clean = (v) => v && v !== 'none' && v !== 'normal' && v !== 'auto' && v !== '0px' && v !== 'rgba(0, 0, 0, 0)'
+  // Is this element effectively invisible to a real visitor?
+  //
+  // The whole pipeline pipes live-site text verbatim into spec files that an
+  // agent later reads as "copy to reproduce". Text a human never sees is
+  // exactly where a hostile page plants content aimed at that agent, so it gets
+  // FLAGGED rather than silently mixed in with genuine visible copy. The flag
+  // does not remove anything; it tells the reader to treat that string as
+  // suspect instead of as real site content.
+  //
+  // Deliberately a heuristic, not a rendering engine. False positives cost one
+  // extra look; a false negative is the case that actually hurts.
+  // Kept byte-identical to the copy in pageTopology() — in-page functions are
+  // serialized standalone, so they cannot share a helper.
+  function isVisuallyHidden(element) {
+    if (!element || element.nodeType !== 1) return false
+    // Native check first: it accounts for ANCESTOR display/visibility/opacity,
+    // which getComputedStyle on the element alone cannot. contentVisibilityAuto
+    // is left off on purpose — it reports merely off-screen content as hidden.
+    if (typeof element.checkVisibility === 'function') {
+      try {
+        if (!element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return true
+      } catch { /* older engine, fall through to the manual checks */ }
+    }
+    const cs = getComputedStyle(element)
+    if (cs.display === 'none') return true
+    if (cs.visibility === 'hidden' || cs.visibility === 'collapse') return true
+    const op = parseFloat(cs.opacity)
+    if (Number.isFinite(op) && op <= 0.01) return true
+    // Classic .sr-only / .visually-hidden clipping.
+    const clip = (cs.clip || '').replace(/\s/g, '')
+    if (clip === 'rect(0px,0px,0px,0px)' || clip === 'rect(1px,1px,1px,1px)') return true
+    const clipPath = (cs.clipPath || '').replace(/\s/g, '')
+    if (clipPath === 'inset(50%)' || clipPath === 'inset(100%)') return true
+    // Parked off-screen (left: -9999px and friends). Only meaningful for taken-
+    // out-of-flow elements: a negative rect on a static element usually just
+    // means the page is scrolled past it, which is not hidden.
+    // Walked up the ancestor chain because checkVisibility() ignores position
+    // entirely — an <h2> sitting in an off-screen wrapper is exactly as
+    // invisible as the wrapper, and headings are collected flat, so without
+    // this the wrapper gets flagged and its heading does not.
+    const off = (v) => { const n = parseFloat(v); return Number.isFinite(n) && n <= -1000 }
+    for (let node = element, depth = 0; node && node.nodeType === 1 && depth < 30; node = node.parentElement, depth++) {
+      const ncs = node === element ? cs : getComputedStyle(node)
+      if ((ncs.position === 'absolute' || ncs.position === 'fixed') && (off(ncs.left) || off(ncs.top))) return true
+    }
+    // Collapsed to nothing while still carrying text. Gated on text so ordinary
+    // zero-height layout wrappers and 1px rules are not flagged.
+    const hasText = (element.textContent || '').trim().length > 0
+    if (hasText) {
+      const r = element.getBoundingClientRect()
+      if (r.width <= 1 || r.height <= 1) return true
+    }
+    return false
+  }
   function extractStyles(element) {
     const cs = getComputedStyle(element)
     const styles = {}
@@ -205,6 +278,11 @@ function pageExtract(selector) {
       tag: element.tagName.toLowerCase(),
       classes: cls,
       text: element.childNodes.length === 1 && element.childNodes[0].nodeType === 3 ? element.textContent.trim().slice(0, 200) : null,
+      // Present ONLY when true. Stamping `visuallyHidden: false` onto every node
+      // of a 4-deep tree would triple the noise for the common case and make the
+      // flag easy to skim past — an absent field reads as "nothing to worry
+      // about", a present one is impossible to miss.
+      ...(isVisuallyHidden(element) ? { visuallyHidden: true } : {}),
       styles: extractStyles(element),
       image: element.tagName === 'IMG' ? { src: element.currentSrc || element.src, alt: element.alt, naturalWidth: element.naturalWidth, naturalHeight: element.naturalHeight } : null,
       childCount: children.length,
@@ -248,6 +326,37 @@ function pageTopology() {
   const main = document.querySelector('main') || body
   const box = (el) => { const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y + window.scrollY), w: Math.round(r.width), h: Math.round(r.height) } }
   const cls = (el) => (el.className && el.className.toString ? el.className.toString() : '')
+  // Byte-identical copy of the helper in pageExtract(). See the long comment
+  // there for why hidden text is flagged rather than silently reported as copy;
+  // in-page functions are serialized standalone so they cannot share it.
+  function isVisuallyHidden(element) {
+    if (!element || element.nodeType !== 1) return false
+    if (typeof element.checkVisibility === 'function') {
+      try {
+        if (!element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return true
+      } catch { /* older engine, fall through to the manual checks */ }
+    }
+    const cs = getComputedStyle(element)
+    if (cs.display === 'none') return true
+    if (cs.visibility === 'hidden' || cs.visibility === 'collapse') return true
+    const op = parseFloat(cs.opacity)
+    if (Number.isFinite(op) && op <= 0.01) return true
+    const clip = (cs.clip || '').replace(/\s/g, '')
+    if (clip === 'rect(0px,0px,0px,0px)' || clip === 'rect(1px,1px,1px,1px)') return true
+    const clipPath = (cs.clipPath || '').replace(/\s/g, '')
+    if (clipPath === 'inset(50%)' || clipPath === 'inset(100%)') return true
+    const off = (v) => { const n = parseFloat(v); return Number.isFinite(n) && n <= -1000 }
+    for (let node = element, depth = 0; node && node.nodeType === 1 && depth < 30; node = node.parentElement, depth++) {
+      const ncs = node === element ? cs : getComputedStyle(node)
+      if ((ncs.position === 'absolute' || ncs.position === 'fixed') && (off(ncs.left) || off(ncs.top))) return true
+    }
+    const hasText = (element.textContent || '').trim().length > 0
+    if (hasText) {
+      const r = element.getBoundingClientRect()
+      if (r.width <= 1 || r.height <= 1) return true
+    }
+    return false
+  }
   const sections = [...main.children].map((el, i) => ({
     index: i,
     tag: el.tagName.toLowerCase(),
@@ -258,13 +367,22 @@ function pageTopology() {
     zIndex: getComputedStyle(el).zIndex,
     childCount: el.children.length,
     text: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120),
+    // Only emitted when true — see pageExtract(). On a section this usually
+    // means a hidden mobile/desktop variant or an off-screen drawer, but it is
+    // also the shape a text-injection payload takes, so read that `text` with
+    // suspicion instead of copying it.
+    ...(isVisuallyHidden(el) ? { visuallyHidden: true } : {}),
   }))
   return {
     title: document.title,
     pageHeight: document.documentElement.scrollHeight,
     sectionCount: sections.length,
     sections,
-    headings: [...document.querySelectorAll('h1,h2,h3')].slice(0, 60).map((h) => ({ tag: h.tagName.toLowerCase(), text: (h.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100) })),
+    headings: [...document.querySelectorAll('h1,h2,h3')].slice(0, 60).map((h) => ({
+      tag: h.tagName.toLowerCase(),
+      text: (h.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100),
+      ...(isVisuallyHidden(h) ? { visuallyHidden: true } : {}),
+    })),
   }
 }
 
@@ -353,6 +471,208 @@ function mergeTokenPasses(passes) {
       .slice(0, topN)
   }
   return merged
+}
+
+// ---- download network guards (Node-side) -----------------------------------
+// `download` fetches whatever URL list the target page hands it. Unguarded that
+// is two live footguns: an SSRF primitive (a page that points at
+// http://169.254.169.254/ cloud metadata, http://127.0.0.1:9200/ or file:///)
+// and a memory bomb (one "image" that streams 8GB into a Buffer).
+//
+// Every guard below is PER ASSET and NON-FATAL. A rejected URL becomes a
+// manifest entry with `skipped: true` and a reason string; it never throws, so
+// one hostile asset cannot kill a 200-asset run. That is the whole design goal
+// — the manifest is the report, not the exception.
+
+// 50MB comfortably clears a real hero video or a 4k source image while stopping
+// a pathological response cold. Paired with DOWNLOAD_CONCURRENCY below, the
+// worst-case resident set for the download step is bounded at ~200MB.
+const MAX_ASSET_BYTES = 50 * 1024 * 1024
+// data: URIs are decoded in memory with no network round trip, so they get a
+// much tighter cap. 512KB fits genuine inline logos/icons/sprites; anything
+// bigger is either a mistake or an attempt to blow up the manifest.
+const MAX_DATA_URI_BYTES = 512 * 1024
+// Redirects are followed by hand (see fetchGuarded) so EVERY hop is re-checked.
+// fetch's own redirect:'follow' would let a public hostname bounce to
+// 127.0.0.1 and walk straight through the destination check.
+const MAX_REDIRECTS = 5
+// Unchanged from the original 4. Re-checked against the new size cap: 4 workers
+// x 50MB is a bounded ~200MB ceiling, and 4 parallel requests stays polite
+// enough not to look like an attack to the target's rate limiter.
+const DOWNLOAD_CONCURRENCY = 4
+
+const MIME_EXT = {
+  'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp',
+  'image/avif': '.avif', 'image/svg+xml': '.svg', 'image/x-icon': '.ico',
+  'image/vnd.microsoft.icon': '.ico', 'video/mp4': '.mp4', 'video/webm': '.webm',
+  'font/woff2': '.woff2', 'font/woff': '.woff',
+}
+
+// RFC 1918 private, loopback, link-local, plus the neighbouring ranges that are
+// equally useless to a website clone and equally attractive to an SSRF probe
+// (0.0.0.0/8, CGNAT 100.64/10, 192.0.0.0/24, multicast and reserved 224+).
+// Anything unparseable returns true: fail CLOSED, a URL we cannot reason about
+// does not get fetched.
+function isPrivateIPv4(ip) {
+  const p = String(ip).split('.').map(Number)
+  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true
+  const [a, b] = p
+  if (a === 0 || a === 10 || a === 127) return true
+  if (a === 169 && b === 254) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  if (a === 192 && b === 0) return true
+  if (a === 100 && b >= 64 && b <= 127) return true
+  if (a >= 224) return true
+  return false
+}
+
+// ::1 loopback, :: unspecified, fc00::/7 unique-local, fe80::/10 link-local,
+// and IPv4-mapped addresses unwrapped so ::ffff:127.0.0.1 cannot sneak through.
+function isPrivateIPv6(ip) {
+  const s = String(ip).toLowerCase().split('%')[0]
+  if (s === '::1' || s === '::') return true
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(s)
+  if (mapped) return isPrivateIPv4(mapped[1])
+  if (/^f[cd][0-9a-f]{2}:/.test(s)) return true
+  if (/^fe[89ab][0-9a-f]:/.test(s)) return true
+  return false
+}
+
+// One DNS answer per hostname per run. Real pages pull hundreds of assets off a
+// handful of CDN hosts, so without this the guard would be the slowest part of
+// the download step.
+const destinationCache = new Map()
+
+// null = safe to fetch, otherwise a skip reason.
+// Rejects if ANY resolved address is private: a split answer that mixes one
+// public and one loopback record is a rebind attempt, not a pass.
+// Known limit: this is a check-then-fetch, so a sub-second DNS rebind between
+// the two could still slip past. Closing that needs a pinned-IP socket, which
+// is far more machinery than this tool warrants — the realistic threats here
+// (a literal 127.0.0.1 asset URL, a metadata-endpoint hostname) are all caught.
+async function checkDestination(hostname) {
+  const host = String(hostname || '').replace(/^\[|\]$/g, '')
+  if (!host) return 'unresolvable-host'
+  if (destinationCache.has(host)) return destinationCache.get(host)
+  let reason = null
+  try {
+    const addrs = await dnsLookup(host, { all: true })
+    if (!addrs.length) reason = 'dns-lookup-failed'
+    else if (addrs.some((a) => (a.family === 6 ? isPrivateIPv6(a.address) : isPrivateIPv4(a.address)))) {
+      reason = 'private-network-destination'
+    }
+  } catch {
+    reason = 'dns-lookup-failed'
+  }
+  destinationCache.set(host, reason)
+  return reason
+}
+
+// Small inline assets are real content a clone needs, so they are decoded and
+// written rather than banned outright — the guard is the size cap, not the
+// scheme.
+function decodeDataUri(u) {
+  const m = /^data:([^,]*),([\s\S]*)$/.exec(u)
+  if (!m) return { skipped: true, reason: 'invalid-data-uri' }
+  const meta = m[1]
+  const mime = (meta.split(';')[0] || 'application/octet-stream').toLowerCase()
+  let buf
+  try {
+    buf = /;base64/i.test(meta)
+      ? Buffer.from(m[2], 'base64')
+      : Buffer.from(decodeURIComponent(m[2]), 'utf8')
+  } catch {
+    return { skipped: true, reason: 'invalid-data-uri' }
+  }
+  if (buf.length > MAX_DATA_URI_BYTES) {
+    return { skipped: true, reason: 'data-uri-too-large', bytes: buf.length, limit: MAX_DATA_URI_BYTES }
+  }
+  return { ok: true, buf, mime }
+}
+
+// A data: URI is its own payload, so echoing it into the manifest would dump
+// the entire base64 blob into agent-visible JSON. Everything else prints whole.
+function urlLabel(u) {
+  if (!u.startsWith('data:')) return u
+  return u.slice(0, u.indexOf(',') + 1 || 32) + `…(${u.length} chars)`
+}
+
+// Fetch one asset with protocol, destination and size enforced at every hop.
+// Returns { ok, buf, mime } | { ok:false, status } | { skipped:true, reason }.
+async function fetchGuarded(rawUrl) {
+  let current = rawUrl
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    let u
+    try { u = new URL(current) } catch { return { skipped: true, reason: 'invalid-url' } }
+
+    if (u.protocol === 'data:') {
+      // Only reachable on hop 0; a redirect to data: is nonsense and is caught
+      // by the protocol check below on the next pass anyway.
+      return decodeDataUri(current)
+    }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return { skipped: true, reason: 'protocol-not-allowed', protocol: u.protocol.replace(':', '') }
+    }
+
+    const destReason = await checkDestination(u.hostname)
+    if (destReason) return { skipped: true, reason: destReason, host: u.hostname }
+
+    const controller = new AbortController()
+    // Tracked explicitly instead of sniffing e.name: we abort this controller
+    // ourselves on overflow too, so "was aborted" alone cannot tell a timeout
+    // apart from a deliberate cap trip.
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; controller.abort() }, navTimeout)
+    try {
+      const res = await fetch(u.href, { redirect: 'manual', signal: controller.signal })
+
+      const location = res.headers.get('location')
+      if (res.status >= 300 && res.status < 400 && location) {
+        try { if (res.body) await res.body.cancel() } catch { /* already closed */ }
+        try { current = new URL(location, u.href).href } catch { return { skipped: true, reason: 'invalid-redirect' } }
+        continue
+      }
+      if (!res.ok) {
+        try { if (res.body) await res.body.cancel() } catch { /* already closed */ }
+        return { ok: false, status: res.status }
+      }
+
+      // Content-Length is advisory: often absent on chunked responses and
+      // trivially lied about. Check it when present as a cheap early-out, then
+      // cap the bytes ACTUALLY read so a missing or false header cannot matter.
+      const declared = Number(res.headers.get('content-length'))
+      if (Number.isFinite(declared) && declared > MAX_ASSET_BYTES) {
+        try { if (res.body) await res.body.cancel() } catch { /* already closed */ }
+        return { skipped: true, reason: 'asset-too-large', bytes: declared, limit: MAX_ASSET_BYTES }
+      }
+      if (!res.body) return { ok: true, buf: Buffer.alloc(0), mime: (res.headers.get('content-type') || '').split(';')[0].trim() }
+
+      const chunks = []
+      let total = 0
+      let overflow = false
+      for await (const chunk of res.body) {
+        total += chunk.byteLength
+        // BREAK, do not abort-and-return from inside the loop. Aborting here
+        // makes the async iterator's cleanup reject, that rejection escapes the
+        // for-await, and the catch below overwrites this perfectly good
+        // 'asset-too-large' result with a bogus 'fetch-timeout'. Leave the loop
+        // cleanly first, tear the socket down after.
+        if (total > MAX_ASSET_BYTES) { overflow = true; break }
+        chunks.push(chunk)
+      }
+      if (overflow) {
+        try { controller.abort() } catch { /* nothing left to tear down */ }
+        return { skipped: true, reason: 'asset-too-large', bytes: total, limit: MAX_ASSET_BYTES }
+      }
+      return { ok: true, buf: Buffer.concat(chunks), mime: (res.headers.get('content-type') || '').split(';')[0].trim() }
+    } catch (e) {
+      return { skipped: true, reason: timedOut ? 'fetch-timeout' : 'fetch-failed', error: String((e && e.message) || e) }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return { skipped: true, reason: 'too-many-redirects', limit: MAX_REDIRECTS }
 }
 
 // ---- driver ----------------------------------------------------------------
@@ -505,13 +825,23 @@ try {
     for (const f of data.favicons) if (f.href) urls.add(f.href)
     for (const b of data.backgroundImages) {
       const m = /url\(["']?(.*?)["']?\)/.exec(b.url || '')
-      if (m && m[1] && !m[1].startsWith('data:')) { try { urls.add(new URL(m[1], url).href) } catch {} }
+      if (m && m[1]) { try { urls.add(new URL(m[1], url).href) } catch {} }
     }
-    const list = [...urls].filter((u) => u && !u.startsWith('data:'))
+    // data: URIs are no longer filtered out here — fetchGuarded decodes the
+    // small ones (a real inline logo IS an asset the clone needs) and rejects
+    // oversized ones with a reason, which is strictly more useful than the old
+    // silent drop.
+    const list = [...urls].filter(Boolean)
     const used = new Set()
-    const uniqueName = (u, i) => {
+    const uniqueName = (u, i, mime) => {
       let name = ''
-      try { name = basename(new URL(u).pathname).split('?')[0] } catch {}
+      if (u.startsWith('data:')) {
+        // A data: URI has no pathname worth reading — basename() on one returns
+        // a slice of the base64 payload. Name it from the decoded MIME instead.
+        name = 'inline-' + i + (MIME_EXT[mime] || '')
+      } else {
+        try { name = basename(new URL(u).pathname).split('?')[0] } catch {}
+      }
       if (!name) name = 'asset-' + i
       let final = name; let n = 1
       while (used.has(final)) { const dot = name.lastIndexOf('.'); final = dot > 0 ? `${name.slice(0, dot)}-${n}${name.slice(dot)}` : `${name}-${n}`; n++ }
@@ -523,18 +853,30 @@ try {
       while (idx < list.length) {
         const i = idx++
         const u = list[i]
+        const label = urlLabel(u)
+        // fetchGuarded is written not to throw, but the catch stays as a
+        // backstop: the contract of this loop is that ONE bad asset can never
+        // abort the run, and that must hold even if a guard itself misbehaves.
         try {
-          const res = await fetch(u)
-          if (!res.ok) { manifest.push({ url: u, ok: false, status: res.status }); continue }
-          const buf = Buffer.from(await res.arrayBuffer())
-          const dest = join(outdir, uniqueName(u, i))
-          await writeFile(dest, buf)
-          manifest.push({ url: u, ok: true, file: dest, bytes: buf.length })
-        } catch (e) { manifest.push({ url: u, ok: false, error: String((e && e.message) || e) }) }
+          const res = await fetchGuarded(u)
+          if (res.skipped) { manifest.push({ url: label, ...res }); continue }
+          if (!res.ok) { manifest.push({ url: label, ok: false, status: res.status }); continue }
+          const dest = join(outdir, uniqueName(u, i, res.mime))
+          await writeFile(dest, res.buf)
+          manifest.push({ url: label, ok: true, file: dest, bytes: res.buf.length })
+        } catch (e) { manifest.push({ url: label, ok: false, error: String((e && e.message) || e) }) }
       }
     }
-    await Promise.all(Array.from({ length: 4 }, worker))
-    console.log(JSON.stringify({ outdir, total: list.length, downloaded: manifest.filter((m) => m.ok).length, manifest }, null, 2))
+    await Promise.all(Array.from({ length: DOWNLOAD_CONCURRENCY }, worker))
+    console.log(JSON.stringify({
+      outdir,
+      total: list.length,
+      downloaded: manifest.filter((m) => m.ok).length,
+      skipped: manifest.filter((m) => m.skipped).length,
+      failed: manifest.filter((m) => m.ok === false).length,
+      limits: { maxAssetBytes: MAX_ASSET_BYTES, maxDataUriBytes: MAX_DATA_URI_BYTES, concurrency: DOWNLOAD_CONCURRENCY },
+      manifest,
+    }, null, 2))
   }
 } catch (e) {
   console.error(JSON.stringify({ error: String((e && e.message) || e) }))
