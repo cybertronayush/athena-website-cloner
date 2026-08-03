@@ -279,4 +279,4 @@ Clone only sites you are authorized to replicate. Logos, brand assets and copy b
 
 ## License
 
-MIT, with dual attribution: original work © 2025 JCodesMore, modifications and additions © 2026 Ayush Singh (madmethod.io). See [LICENSE](LICENSE) for the full text.
+MIT, See [LICENSE](LICENSE) for the full text.
