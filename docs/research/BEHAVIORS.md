@@ -59,7 +59,7 @@ Not swept. No scrolled captures exist for any section past the hero. **Gap.**
 
 ## 2. Motion sweep (time-driven / self-animating)
 
-### Hero card carousel — ROTATING. This is the run's headline correction.
+### Hero card carousel — ROTATING. This was the run's headline correction.
 
 The carousel is a 10-card 3D cylinder that spins continuously with no user input.
 
@@ -80,30 +80,41 @@ The carousel is a 10-card 3D cylinder that spins continuously with no user input
   is an arbitrary mid-rotation value, which is what a snapshot of a moving ring
   looks like.
 
-**Measured motion values** — steady-state **5.284 deg/s**, plus roughly **29.8°**
-of eased spin-in over the first ~2s.
+**Measured motion values** — steady-state **5.284 deg/s** (one full revolution in
+roughly **68s**), plus **29.8°** of eased spin-in decaying with a **500ms** time
+constant, so it settles into the constant rate within about 2s. Full angle:
+`angle = 5.284 * elapsedSeconds + 29.8 * (1 - exp(-elapsedMs / 500))`.
 
-> **Provenance gap, stated plainly.** These two numbers are *not* traceable to any
+> **Provenance gap, stated plainly.** These numbers are *not* traceable to any
 > raw artifact in `docs/research/`. No `motion-check` output was ever saved here.
 > They are sourced from `src/sections/hero/HeroSection.tsx` (lines 15-16 and
 > 38-42, which document them as "measured over a 20s window, ±0.02"), and are
-> corroborated by `README.md` line 188, `CHANGELOG.md` line 11, and
-> `ARCHITECTURE.md` line 21 — all three of which independently cite 5.284 deg/s.
-> Treat them as real measurements whose evidence file was not persisted. To close
-> this gap properly:
+> corroborated by `hero-section.spec.md` → `## Animation & Motion`,
+> `README.md` line 188, `CHANGELOG.md` line 11, and `ARCHITECTURE.md` line 21 —
+> all of which independently cite 5.284 deg/s. Note that every one of those is a
+> curated document, not a capture, so they raise confidence without closing the
+> gap. Treat the values as real measurements whose evidence file was not
+> persisted. To close this gap properly:
 > `node "$H/scripts/inspect.mjs" motion-check https://www.bendingspoons.com ".carousel" --duration 20000 --samples 10 > docs/research/hero-motion-check.json`
 
-**This is the false negative SKILL.md warns about, and it happened here.**
-`docs/research/components/hero-section.spec.md` (as read on 2026-08-04) still
-declares the section `static`, justified by "byte-identical card transforms at
-200ms vs 3000ms wait". That is precisely the two-call `extract --wait` technique
-SKILL.md line 142 forbids for this question: *"a genuinely-rotating carousel
-reads as byte-identical and gets recorded as static."* The card transforms are
-byte-identical because the cards never move relative to each other — only the
-parent container rotates. `ARCHITECTURE.md` line 21 records this incident as the
-reason the `motion-check` subcommand exists at all.
+**Historical — the false negative SKILL.md warns about happened here, and it has
+since been fixed.** An earlier revision of
+`docs/research/components/hero-section.spec.md` declared this section `static`,
+justified by "byte-identical card transforms at 200ms vs 3000ms wait". That is
+precisely the two-call `extract --wait` technique SKILL.md line 142 forbids for
+this question: *"a genuinely-rotating carousel reads as byte-identical and gets
+recorded as static."* The diff came back clean because the cards never move
+relative to each other — the rotation lives one level up, on the `.carousel`
+parent, so diffing the cards could never have detected it. `ARCHITECTURE.md`
+line 21 records this incident as the reason the `motion-check` subcommand exists
+at all.
 
-**If you read that spec, the spec is wrong and this file is right.**
+**Current state: the spec and this file agree — there is no contradiction.**
+`hero-section.spec.md` was corrected in commit `8ee25e7`. It now reads
+*"Interaction model: time-driven continuous rotation"*, carries a full
+`## Animation & Motion` section holding the same values recorded here, and keeps
+its own dated correction note explaining the original error. Read either; they
+say the same thing.
 
 ### Hero card videos — autoplay, looping, muted
 From `global-assets.json` → `videos[]`. Nine files under
@@ -135,7 +146,8 @@ computed style is the resting end-state of a filter animation that has already
 finished.
 
 That is a hint, not a measurement. The actual implemented values live in
-`HeroSection.tsx` (`HERO_CSS`) and are **not** independently traceable to a raw
+`HeroSection.tsx` (`HERO_CSS`), are mirrored in `hero-section.spec.md` →
+`### Entrance animations`, and are **not** independently traceable to a raw
 artifact:
 
 - `.hero-rise` (h1): opacity 0→1, `translate3d(0, 50px, 0)` → 0, `1000ms cubic-bezier(0.215, 0.61, 0.355, 1)`.
@@ -147,13 +159,14 @@ between sampled endpoints are often genuinely unobservable — so treat these as
 the builder's calibrated approximation, flagged as such, not as extracted fact.
 
 ### 3D setup — implemented but not in the saved capture
-`HeroSection.tsx` documents `perspective: 800px` on the wrapper,
-`transform-style: preserve-3d` on wrapper and carousel, and
-`backface-visibility: hidden` on every card (which is what hides the near half of
-the cylinder). **None of these three properties appear anywhere in
-`hero-extract.json`** — the capture's style whitelist does not include them
-(verified: zero matches for `perspective`, `transformStyle`, `backfaceVisibility`
-in the file). Real values, unpersisted evidence.
+`HeroSection.tsx` and `hero-section.spec.md` → `### 3D setup` both document
+`perspective: 800px` on the wrapper, `transform-style: preserve-3d` on wrapper
+and carousel, `backface-visibility: hidden` on the carousel and every card (which
+is what hides the near half of the cylinder), and `will-change: transform` on the
+carousel. **None of those properties appear anywhere in `hero-extract.json`** —
+the capture's style whitelist does not include them (verified: zero matches for
+`perspective`, `transformStyle`, `backfaceVisibility` in the file). Real values,
+unpersisted evidence.
 
 ### Interviews section — Embla Carousel, third-party
 `global-assets.json` → six images `interview-1` … `interview-6`, every one with
@@ -298,7 +311,7 @@ down. Assume nothing about `desktop:` when building sections 2 onward.
 | 3 | What drives the Embla interviews carousel? | Only the class name was captured | `motion-check` for autoplay, then `--click` the controls |
 | 4 | Every hover state on the site | Sweep never ran; transitions are declared on nav/CTA/logo | `extract --hover` on each interactive element |
 | 5 | Every click state on the site | Sweep never ran | `extract --click` on each button/tab/card |
-| 6 | Real carousel motion numbers as a persisted artifact | 5.284 deg/s is documented in code + 3 docs, backed by no file in `docs/research/` | `motion-check ".carousel" --duration 20000 --samples 10`, save the JSON |
+| 6 | Real carousel motion numbers as a persisted artifact | 5.284 deg/s is documented in the component plus four curated docs, backed by no capture file in `docs/research/` | `motion-check ".carousel" --duration 20000 --samples 10`, save the JSON |
 | 7 | Hero entrance timing | 1000ms / cubic-bezier(0.215, 0.61, 0.355, 1) / 200ms stagger are unmeasured | Sample during load, or accept as flagged approximation per SKILL.md line 253 |
 
 ## 8. What the clone actually implements today

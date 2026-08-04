@@ -115,8 +115,12 @@ Fully extracted, never built. `src/sections/` contains no header folder.
 
 - **Files:** `src/sections/hero/HeroSection.tsx`, `src/sections/hero/section.meta.json`
   (`order: 10`, `componentName: "HeroSection"`, `importPath: "../sections/hero/HeroSection"`).
-- **Spec:** `docs/research/components/hero-section.spec.md` — **note: its
-  "Interaction model: static" line is wrong.** See `BEHAVIORS.md` §2.
+- **Spec:** `docs/research/components/hero-section.spec.md` — current and correct.
+  It records the interaction model as "time-driven continuous rotation", carries a
+  full `## Animation & Motion` section with the measured values, and resolves the
+  full 10-card asset mapping in DOM order. It also keeps a dated note recording
+  that an earlier revision wrongly called this section `static`; that was
+  corrected in commit `8ee25e7`. See `BEHAVIORS.md` §2 for the history.
 - **Artifacts:** `hero-extract.json`, `docs/design-references/bendingspoons-{desktop,tablet,mobile}.png`.
 - **Root:** `section.gradient-overlay.relative.flex.min-h-screen.flex-col` —
   `1440 × 900px`, `min-height: 900px`, `background-color: rgb(0, 0, 0)`,
@@ -251,7 +255,7 @@ on the footer.
 
 ## Current assembly state
 
-`src/app/page.tsx` today:
+`src/app/page.tsx` in full, as of commit `8ee25e7`:
 
 ```tsx
 // BEGIN GENERATED SECTION IMPORTS
@@ -260,10 +264,7 @@ import { HeroSection } from "../sections/hero/HeroSection";
 
 export default function Home() {
   return (
-    <main className="flex min-h-screen items-center justify-center">
-      <p className="text-muted-foreground">
-        Clone target not yet built. Run <code …>/clone-website</code> to start.
-      </p>
+    <main>
       {/* BEGIN GENERATED SECTIONS */}
       <HeroSection />
       {/* END GENERATED SECTIONS */}
@@ -272,18 +273,32 @@ export default function Home() {
 }
 ```
 
-Two known problems, both a consequence of stopping after one section:
+This is clean and ready to take more sections. A bare `<main>` imposes no layout
+of its own, so sections stack in normal document flow at full bleed — which is
+what the target does. New sections drop straight into the generated block in
+`order` sequence with nothing to undo first.
 
-1. **Scaffold placeholder leak.** The "Clone target not yet built" `<p>` still
-   renders, *beside* the hero. `README.md` line 190 acknowledges this. Commit
-   `e09ad5f` added page-scaffold-leak detection to the skill in response.
-2. **Wrong root layout for a real page.** `flex min-h-screen items-center
-   justify-center` centers a single element. The target is a vertical stack of
-   full-bleed sections. Phase 4 must replace this with a plain vertical flow
-   before the second section lands, or every new section will be laid out
-   side-by-side.
+Two problems that existed earlier in this run were both fixed in `8ee25e7`:
 
-Neither is a hero bug. The hero itself is pixel-verified per `README.md` line 186.
+1. **Scaffold placeholder leak — RESOLVED.** The scaffold's "Clone target not yet
+   built" `<p>` used to render beside the hero. It is gone. Commit `e09ad5f` had
+   already added page-scaffold-leak detection to the skill in response to this
+   class of bug.
+2. **Root layout — RESOLVED.** `<main>` previously carried
+   `flex min-h-screen items-center justify-center`, which centers a single child
+   and would have laid successive sections out side-by-side. Those classes are
+   gone.
+
+One knock-on to be aware of: `README.md` line 190 was not touched by `8ee25e7`,
+so its trailing clause — "`src/app/page.tsx` still renders the scaffold
+placeholder below the hero" — is now stale. **Only that clause.** The same line's
+list of unbuilt sections (header, Products, Proprietary technologies, Interviews,
+careers CTA, footer) is still accurate and is still the source this document
+cites for the section inventory above. Fixing the README is out of scope here;
+flagged so nobody re-adds the placeholder to make the code match the prose.
+
+Neither problem was ever a hero bug. The hero itself is pixel-verified per
+`README.md` line 186.
 
 ## Assembly order for the remaining work
 
