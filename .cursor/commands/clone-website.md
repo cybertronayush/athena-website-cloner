@@ -43,6 +43,13 @@ node "$H/scripts/inspect.mjs" motion-check <url> "<css-selector>" [--duration 80
 
 **Multi-state extraction = two calls, then diff.** To capture a scroll/hover/click state, run `extract` (or `screenshot`) once in the default state and again with `--scroll Y` / `--hover SEL` / `--click SEL`. The diff between the two outputs IS the behavior spec. Use `--wait MS` to let animations settle. This two-call diff is for *triggered* states only — for self-driven, continuous motion use `motion-check`, never two `extract --wait` calls (see the Motion sweep in Phase 1).
 
+**Every `inspect.mjs` output carries a `_meta` block** at the top level recording what produced it: `cmd`, `url`, `selector`, `viewport`, `capturedAt`, `pageHeight`, `domHash`, and the actions actually applied. Keep it when you save an artifact to `docs/research/` — it is the only thing that makes a saved capture verifiable later. Two fields earn their keep on the two-call diff above:
+
+- **`scroll` vs `scrollY`** — requested offset vs the offset the page actually reached. If you diff a `--scroll 400` capture against a `--scroll 0` capture and the two come back identical, check `scrollY` first. `scrollY: 400` means the scroll happened and the element genuinely does not respond to it. `scrollY: 0` means the page never scrolled (usually it is shorter than you assumed) and your "no change" result is worthless.
+- **`ignoredFlags`** — present when you passed a flag the subcommand never acts on. `assets` and `topology` read the page as loaded, so `topology --scroll 400` is *not* a scrolled capture and will say so.
+
+`domHash` is a hash of the rendered DOM at capture time. Read it in one direction: equal hashes are strong evidence the page did not change between two captures; different hashes are a hint, not proof, because lazily-injected scripts can shift the DOM between two otherwise identical loads.
+
 If `inspect.mjs` fails because Playwright/Chromium is missing, run once: `cd "$H/scripts" && npm install && npx playwright install chromium`.
 
 ## Scope Defaults

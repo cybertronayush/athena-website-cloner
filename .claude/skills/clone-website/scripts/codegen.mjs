@@ -57,6 +57,12 @@
  *     used in that same section regardless of specificity.
  *   - a generated target is not writable (locked). All targets are checked
  *     before the first write, so a run is all-or-nothing, never partial.
+ *   - leftover non-generated markup inside the element that wraps the generated
+ *     section list in `page.tsx`, once at least one section is actually mounted.
+ *     The scaffold ships a centered "Clone target not yet built" placeholder as a
+ *     sibling of the marker block; codegen only ever rewrites BETWEEN the markers,
+ *     so that placeholder survives every regeneration and renders on top of the
+ *     real page while the build stays green.
  *
  * Usage:
  *   node codegen.mjs <root> [--check]
@@ -521,6 +527,221 @@ function ensurePageJsxMarkers(source) {
   return lines.join('\n')
 }
 
+/**
+ * Children that legitimately sit beside the generated section list.
+ *
+ * The stock scaffold has none — `<main>` holds the placeholder paragraph and the
+ * marker block, nothing else — but screen-reader-only furniture (a skip link, an
+ * aria-live region) belongs to the page shell rather than to any one section, so
+ * it is exempted rather than forcing it into a fake section folder.
+ */
+const ALLOWED_WRAPPER_CHILD = [/\bsr-only\b/]
+
+/** Collapse a residual JSX snippet down to a one-line excerpt for the report. */
+function condense(snippet, max = 96) {
+  const flat = snippet.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
+}
+
+/**
+ * Read one JSX tag starting at `src[start] === '<'`.
+ * Quotes and `{...}` attribute expressions are skipped so a `>` inside them does
+ * not end the tag early. Returns `null` for anything that is not a tag (a bare
+ * `<` in an expression, a `<>` fragment), which the caller treats as plain text.
+ */
+function readJsxTag(src, start) {
+  let i = start + 1
+  let closing = false
+  if (src[i] === '/') {
+    closing = true
+    i += 1
+  }
+  const m = /^[A-Za-z_$][\w.$:-]*/.exec(src.slice(i, i + 200))
+  if (!m) return null
+  const name = m[0]
+  i += name.length
+  let braces = 0
+  while (i < src.length) {
+    const c = src[i]
+    if (c === '"' || c === "'" || c === '`') {
+      const q = c
+      i += 1
+      while (i < src.length && src[i] !== q) i += src[i] === '\\' ? 2 : 1
+      i += 1
+      continue
+    }
+    if (c === '{') {
+      braces += 1
+      i += 1
+      continue
+    }
+    if (c === '}') {
+      braces -= 1
+      i += 1
+      continue
+    }
+    if (c === '<' && braces === 0) return null // never a tag: `a < b`, or malformed
+    if (c === '>' && braces === 0) {
+      return { name, closing, selfClosing: /\/\s*$/.test(src.slice(start, i)), start, end: i + 1 }
+    }
+    i += 1
+  }
+  return null
+}
+
+/**
+ * Find the element that directly wraps the generated section block and return
+ * every direct child of it that codegen did NOT put there.
+ *
+ * Deliberately conservative: any structure this shallow scanner cannot resolve
+ * (unbalanced tags, a fragment as the wrapper, missing markers) returns `null`
+ * and the caller stays silent, so the check never guesses a violation.
+ */
+function wrapperResidue(source) {
+  const markerStart = source.indexOf(PAGE_JSX_BEGIN)
+  const endAt = source.indexOf(PAGE_JSX_END)
+  if (markerStart === -1 || endAt === -1 || endAt < markerStart) return null
+  const markerEnd = endAt + PAGE_JSX_END.length
+
+  const stack = []
+  let wrapper = null
+  let i = 0
+
+  const flushText = (frame, upto) => {
+    if (!frame) return
+    if (upto > frame.cursor && source.slice(frame.cursor, upto).trim() !== '') {
+      frame.children.push({ kind: 'text', start: frame.cursor, end: upto })
+    }
+    frame.cursor = upto
+  }
+
+  while (i < source.length) {
+    const c = source[i]
+
+    // Outside JSX this is ordinary JS: skip comments and string literals so the
+    // scaffold's own `src/sections/<name>/...` header comment is not read as a tag.
+    if (stack.length === 0) {
+      if (c === '/' && source[i + 1] === '/') {
+        const nl = source.indexOf('\n', i)
+        i = nl === -1 ? source.length : nl
+        continue
+      }
+      if (c === '/' && source[i + 1] === '*') {
+        const e = source.indexOf('*/', i + 2)
+        i = e === -1 ? source.length : e + 2
+        continue
+      }
+      if (c === '"' || c === "'" || c === '`') {
+        const q = c
+        i += 1
+        while (i < source.length && source[i] !== q) i += source[i] === '\\' ? 2 : 1
+        i += 1
+        continue
+      }
+    } else if (c === '{' && source[i + 1] === '/' && source[i + 2] === '*') {
+      // JSX comment — this is what the generated markers themselves are.
+      const e = source.indexOf('*/}', i + 3)
+      i = e === -1 ? source.length : e + 3
+      continue
+    }
+
+    if (c !== '<') {
+      i += 1
+      continue
+    }
+
+    const tag = readJsxTag(source, i)
+    if (!tag) {
+      i += 1
+      continue
+    }
+
+    // The first tag at or past the BEGIN marker is inside the wrapper, so whatever
+    // is on top of the stack right now IS the wrapper. Holding the frame object
+    // keeps collecting its children until it closes.
+    if (wrapper === null && tag.start >= markerStart) wrapper = stack[stack.length - 1] || null
+
+    const top = stack[stack.length - 1] || null
+
+    if (tag.closing) {
+      const frame = stack.pop()
+      if (!frame || frame.name !== tag.name) return null // unbalanced — do not guess
+      flushText(frame, tag.start)
+      frame.contentEnd = tag.start
+      frame.closeEnd = tag.end
+      const parent = stack[stack.length - 1]
+      if (parent) {
+        parent.children.push({ kind: 'element', start: frame.openStart, end: tag.end })
+        parent.cursor = tag.end
+      }
+    } else if (tag.selfClosing) {
+      flushText(top, tag.start)
+      if (top) {
+        top.children.push({ kind: 'element', start: tag.start, end: tag.end })
+        top.cursor = tag.end
+      }
+    } else {
+      flushText(top, tag.start)
+      stack.push({ name: tag.name, openStart: tag.start, cursor: tag.end, children: [], contentEnd: -1 })
+    }
+
+    i = tag.end
+  }
+
+  if (!wrapper || wrapper.contentEnd === -1) return null
+
+  const stripJsxComments = (s) => s.replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '')
+  const residue = []
+  for (const child of wrapper.children) {
+    if (child.start >= markerStart && child.end <= markerEnd) continue // codegen put it there
+    const raw = source.slice(child.start, child.end)
+    // A text run can straddle a marker line; the markers are JSX comments, so
+    // dropping every JSX comment leaves only genuinely stray text behind.
+    const bare = stripJsxComments(raw)
+    if (bare.trim() === '') continue
+    if (child.kind === 'element' && ALLOWED_WRAPPER_CHILD.some((re) => re.test(raw))) continue
+    residue.push({ line: source.slice(0, child.start).split('\n').length, snippet: condense(bare) })
+  }
+
+  return { name: wrapper.name, openTag: source.slice(wrapper.openStart, wrapper.cursor), residue }
+}
+
+/**
+ * codegen owns only the text BETWEEN the markers, so anything the scaffold left
+ * as a SIBLING of the marker block survives every regeneration untouched — the
+ * "Clone target not yet built" placeholder keeps rendering next to the real
+ * sections, and the build stays green the whole time. Once at least one section
+ * is actually mounted that leftover is unambiguously wrong, so it is fatal.
+ *
+ * Before the first section exists, the placeholder is the expected scaffold
+ * state and this check stays quiet.
+ */
+function lintPageScaffoldLeak(pageSource, mountedCount) {
+  if (mountedCount === 0) return
+  const found = wrapperResidue(pageSource)
+  if (!found || found.residue.length === 0) return
+
+  const w = `<${found.name}>`
+  // The scaffold centers its single placeholder child; those classes surviving is
+  // a reliable tell that the wrapper was never converted into a real page shell.
+  const stillCentering = /\bmin-h-screen\b/.test(found.openTag) && /\bitems-center\b/.test(found.openTag) && /\bjustify-center\b/.test(found.openTag)
+
+  for (const r of found.residue) {
+    problem(
+      'page-scaffold-leak',
+      `${rel(PAGE_TSX)}:${r.line}`,
+      `${w} wraps the generated section block but also holds non-generated content: \`${r.snippet}\`. ` +
+        `${mountedCount} real section${mountedCount === 1 ? ' is' : 's are'} mounted, so every child of ${w} must come from codegen — ` +
+        `codegen only ever rewrites between ${PAGE_JSX_BEGIN} and ${PAGE_JSX_END}, so this sibling survives every regeneration and renders on top of the real page while the build stays green. ` +
+        `Delete it, or move it into its own src/sections/<name>/ fragment so codegen mounts it.` +
+        (stillCentering
+          ? ` (${w} also still carries the scaffold's placeholder-centering classes \`min-h-screen items-center justify-center\` — they lay the sections out as centered flex ROW items; replace them with the real page shell.)`
+          : ''),
+      true,
+    )
+  }
+}
+
 function buildPageTsx(sections) {
   if (!existsSync(PAGE_TSX)) {
     problem('missing-target', rel(PAGE_TSX), 'file not found — cannot regenerate section mounts')
@@ -548,6 +769,10 @@ function buildPageTsx(sections) {
     problem('marker-error', rel(PAGE_TSX), `section markers are ${withJsx.reason}`)
     return null
   }
+
+  // Validate the file codegen is ABOUT to write, not the one on disk: the marker
+  // block is already final here, so anything else in the wrapper is a leftover.
+  lintPageScaffoldLeak(withJsx.text, ordered.length)
 
   return { path: PAGE_TSX, content: withJsx.text }
 }

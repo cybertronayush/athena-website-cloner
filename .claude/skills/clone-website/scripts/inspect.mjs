@@ -98,6 +98,17 @@
  * the orchestrator treats it with suspicion instead of reproducing it as real
  * site content.
  *
+ * EVERY subcommand stamps a `_meta` object onto the top level of its JSON output
+ * (see emit() below). It records what produced that artifact: the subcommand, the
+ * URL, the selector, the viewport, the actions that were ACTUALLY applied
+ * (including the scroll offset the page really ended up at), an ISO capture
+ * timestamp, the page height, and a hash of the rendered DOM. Without it two
+ * saved artifacts can be byte-identical and nobody can tell whether the page
+ * genuinely did not change between states or whether the same command simply ran
+ * twice — a failure that has already happened in a real project. `_meta` is
+ * purely additive: it is appended after the existing keys and every existing
+ * consumer of this output ignores it.
+ *
  * download enforces network guards on every asset: http/https only (plus
  * size-capped data: URIs, which are decoded and written), rejection of any URL
  * resolving to a private, loopback or link-local address (SSRF), a 50MB per-
@@ -448,6 +459,70 @@ function pageMotionSample(opts) {
   return { found: true, t: Date.now(), values }
 }
 
+// Provenance read, taken at the moment of capture in whatever state the page is
+// in. Deliberately ONE evaluate and no DOM traversal: it reads outerHTML once,
+// runs three cheap regex passes over it, and hashes it in the page so a
+// multi-megabyte HTML string never crosses the CDP bridge.
+//
+// The normalisation is minimal on purpose. It strips only noise that changes on
+// EVERY load of an unchanged page and would otherwise make two identical
+// captures look different: CSP nonces and React's auto-generated useId values
+// (`:r0:` / `«r0»`). It does NOT try to launder timestamps, build ids or inline
+// script state — that is a bottomless pit, and a hash that is occasionally too
+// sensitive is far safer here than one that hides a real change.
+//
+// KNOWN LIMIT, measured rather than assumed: on a heavy JS site two back-to-back
+// captures of the SAME url in the SAME state can still produce different hashes.
+// On one real target the two DOMs differed by ~10KB purely because a different
+// set of lazily-injected `<script>` chunks had landed by capture time. That is a
+// genuinely different DOM, not noise a normaliser could launder away. So read
+// domHash in one direction only: EQUAL is strong evidence the page did not
+// change, DIFFERENT is a hint worth checking, never proof on its own. If you
+// need to know whether a state change was real, compare the extracted payload
+// and the `scroll`/`scrollY` pair — those are exact.
+//
+// sha256 via crypto.subtle when available, which covers every https target.
+// crypto.subtle does not exist in insecure contexts (a plain http:// target, and
+// http://localhost is the case that actually matters for verification runs), so
+// there is a plain FNV-1a fallback. The algorithm is named in the hash string,
+// so two hashes are only ever compared like-for-like.
+async function pageProvenance() {
+  const root = document.documentElement
+  const html = root ? root.outerHTML : ''
+  const normalized = html
+    .replace(/\snonce="[^"]*"/g, '')
+    .replace(/:r[0-9a-z]+:/g, '')
+    .replace(/«r[0-9a-z]+»/g, '')
+  let domHash = null
+  try {
+    if (globalThis.crypto && globalThis.crypto.subtle && typeof TextEncoder === 'function') {
+      const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(normalized))
+      domHash = 'sha256:' + [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+    }
+  } catch { domHash = null }
+  if (!domHash) {
+    // Two independently-seeded FNV-1a passes = 64 bits, plenty to answer
+    // "did this page materially change between captures?".
+    let h1 = 0x811c9dc5
+    let h2 = 0x01000193
+    for (let i = 0; i < normalized.length; i++) {
+      const c = normalized.charCodeAt(i)
+      h1 = Math.imul(h1 ^ c, 16777619)
+      h2 = Math.imul(h2 ^ c, 2246822519)
+    }
+    domHash = 'fnv1a64:' + (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0')
+  }
+  return {
+    domHash,
+    domLength: normalized.length,
+    pageHeight: root ? root.scrollHeight : null,
+    // The offset the page is ACTUALLY at when the artifact is produced. A
+    // requested --scroll 400 on a page shorter than the viewport leaves this at
+    // 0, which is exactly the thing that makes two "different" captures identical.
+    scrollY: Math.round(window.scrollY || 0),
+  }
+}
+
 // ---- token merging (Node-side) ---------------------------------------------
 const TOKEN_BUCKETS = ['colors', 'spacing', 'radii', 'fonts', 'shadows', 'fontSizes']
 
@@ -676,13 +751,91 @@ async function fetchGuarded(rawUrl) {
 }
 
 // ---- driver ----------------------------------------------------------------
+// What the run ACTUALLY did, as opposed to what was asked for on the command
+// line. Not every subcommand applies every action (assets and topology read the
+// page as loaded and ignore --scroll/--hover/--click entirely), and hover/click
+// swallow their own failures by design, so reporting the raw flags as provenance
+// would sometimes be a lie — the one thing a provenance stamp must never be.
+const applied = { scroll: null, hover: null, click: null, hoverFailed: false, clickFailed: false }
+
 async function applyActions(page) {
   if (flags.scroll !== undefined) {
-    await page.evaluate((y) => window.scrollTo(0, y), N(flags.scroll, 0))
+    const y = N(flags.scroll, 0)
+    await page.evaluate((to) => window.scrollTo(0, to), y)
+    applied.scroll = y
     await page.waitForTimeout(settle)
   }
-  if (flags.hover) { await page.hover(flags.hover).catch(() => {}); await page.waitForTimeout(settle) }
-  if (flags.click) { await page.click(flags.click).catch(() => {}); await page.waitForTimeout(settle) }
+  if (flags.hover) {
+    await page.hover(flags.hover).catch(() => { applied.hoverFailed = true })
+    applied.hover = flags.hover
+    await page.waitForTimeout(settle)
+  }
+  if (flags.click) {
+    await page.click(flags.click).catch(() => { applied.clickFailed = true })
+    applied.click = flags.click
+    await page.waitForTimeout(settle)
+  }
+}
+
+// Flags the caller passed that this subcommand will never act on. Surfacing them
+// beats silently dropping them: `topology --scroll 400` reads like a scrolled
+// capture and is not one.
+function ignoredFlags() {
+  const out = []
+  if (flags.scroll !== undefined && applied.scroll === null) out.push('scroll')
+  if (flags.hover && applied.hover === null) out.push('hover')
+  if (flags.click && applied.click === null) out.push('click')
+  return out
+}
+
+// Read provenance off a live page. Never throws: a failed read degrades to nulls
+// rather than killing an otherwise-good capture.
+async function readProvenance(target) {
+  if (!target) return {}
+  try { return await target.evaluate(pageProvenance) } catch { return {} }
+}
+
+// THE single stdout path for every subcommand.
+//
+// Consolidated so provenance cannot be attached to some artifacts and forgotten
+// on others — that inconsistency is how the original bug (two byte-identical,
+// unattributable nav captures) became unresolvable. `_meta` is spread in LAST so
+// existing keys keep their exact order and shape; consumers that read named keys
+// are unaffected.
+//
+// opts.provenance lets a caller hand in a reading taken earlier, for the
+// --responsive path where the page context is already closed by emit time.
+async function emit(payload, opts = {}) {
+  const prov = opts.provenance !== undefined
+    ? opts.provenance
+    : await readProvenance(opts.page !== undefined ? opts.page : page)
+  const ignored = ignoredFlags()
+  const meta = {
+    cmd,
+    url,
+    selector: opts.selector !== undefined ? opts.selector : null,
+    viewport: opts.viewport !== undefined ? opts.viewport : { width, height, isMobile },
+    // Requested vs. reached. They differ whenever the page cannot scroll that
+    // far, which is the single most common reason two "different scroll states"
+    // come back identical.
+    scroll: opts.scroll !== undefined ? opts.scroll : applied.scroll,
+    scrollY: prov.scrollY !== undefined ? prov.scrollY : null,
+    hover: applied.hover,
+    click: applied.click,
+    ...(applied.hoverFailed ? { hoverFailed: true } : {}),
+    ...(applied.clickFailed ? { clickFailed: true } : {}),
+    ...(ignored.length ? { ignoredFlags: ignored } : {}),
+    waitMs: settle,
+    capturedAt: new Date().toISOString(),
+    pageHeight: prov.pageHeight !== undefined ? prov.pageHeight : null,
+    domHash: prov.domHash !== undefined ? prov.domHash : null,
+    domLength: prov.domLength !== undefined ? prov.domLength : null,
+    ...(opts.extra || {}),
+  }
+  // screenshot historically printed a single line; everything else pretty-prints.
+  // Preserved rather than unified, on the off chance something greps that line.
+  const indent = opts.compact ? undefined : 2
+  console.log(JSON.stringify({ ...payload, _meta: meta }, null, indent))
 }
 
 const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
@@ -722,30 +875,40 @@ try {
     // Two full page loads in one invocation: navigate + extract at each viewport,
     // closing each context before opening the next so only one is ever live.
     const passes = []
+    // Provenance is read per pass and kept, because both contexts are closed
+    // before emit() runs and there is no live page left to ask by then.
+    const passMeta = []
     for (const vp of RESPONSIVE_VIEWPORTS) {
       const pass = await openPage(vp)
       try {
         await applyActions(pass.page)
         passes.push(await pass.page.evaluate(pageTokens, { raw: true }))
+        passMeta.push({ viewport: vp, ...(await readProvenance(pass.page)) })
       } finally {
         await pass.context.close()
       }
     }
-    console.log(JSON.stringify(mergeTokenPasses(passes), null, 2))
+    // The desktop pass is the primary reading; the mobile pass is listed in
+    // `passes` so a merged lock still says exactly which two captures built it.
+    await emit(mergeTokenPasses(passes), {
+      provenance: passMeta[0] || {},
+      viewport: RESPONSIVE_VIEWPORTS[0],
+      extra: { responsive: true, passes: passMeta },
+    })
   } else if (cmd === 'screenshot') {
     const out = positional[1] || 'screenshot.png'
     await applyActions(page)
     await page.screenshot({ path: out, fullPage: !!flags.full })
-    console.log(JSON.stringify({ ok: true, out, width, height, scale, fullPage: !!flags.full }))
+    await emit({ ok: true, out, width, height, scale, fullPage: !!flags.full }, { compact: true })
   } else if (cmd === 'extract') {
     const selector = positional[1]
     if (!selector) die('Error: extract needs a <css-selector>', 2)
     await applyActions(page)
-    console.log(JSON.stringify(await page.evaluate(pageExtract, selector), null, 2))
+    await emit(await page.evaluate(pageExtract, selector), { selector })
   } else if (cmd === 'assets') {
-    console.log(JSON.stringify(await page.evaluate(pageAssets), null, 2))
+    await emit(await page.evaluate(pageAssets))
   } else if (cmd === 'topology') {
-    console.log(JSON.stringify(await page.evaluate(pageTopology), null, 2))
+    await emit(await page.evaluate(pageTopology))
   } else if (cmd === 'motion-check') {
     const selector = positional[1]
     if (!selector) die('Error: motion-check needs a <css-selector>', 2)
@@ -762,6 +925,7 @@ try {
         // Explicit --scroll Y wins over auto scroll-into-view: the caller has
         // named the exact page offset they want the element observed at.
         await page.evaluate((y) => window.scrollTo(0, y), N(flags.scroll, 0))
+        applied.scroll = N(flags.scroll, 0)
         scrollMode = 'explicit'
       } else {
         // scrollIntoViewIfNeeded is a no-op when the element is already visible,
@@ -780,7 +944,7 @@ try {
       samples.push(await page.evaluate(pageMotionSample, { selector, props: motionProps }))
     }
     if (!samples[0].found) {
-      console.log(JSON.stringify({ error: 'Element not found: ' + selector, selector }, null, 2))
+      await emit({ error: 'Element not found: ' + selector, selector }, { selector })
       process.exitCode = 1
     } else {
       const t0 = samples[0].t
@@ -794,7 +958,7 @@ try {
         for (const p of motionProps) if (a.values[p] !== b.values[p]) changed.add(p)
       }
       const changedProperties = [...changed]
-      console.log(JSON.stringify({
+      await emit({
         animating: changedProperties.length > 0,
         changedProperties,
         sampleCount: samples.length,
@@ -810,11 +974,11 @@ try {
         scrollSettleMs: scrollMode === 'none' ? 0 : MOTION_SCROLL_SETTLE_MS,
         requestedDurationMs: motionDuration,
         samples: samples.map((s) => ({ atMs: s.t - t0, found: s.found, ...s.values })),
-      }, null, 2))
+      }, { selector, extra: { scrollMode } })
     }
   } else if (cmd === 'tokens') {
     await applyActions(page)
-    console.log(JSON.stringify(await page.evaluate(pageTokens, { minCount, topN }), null, 2))
+    await emit(await page.evaluate(pageTokens, { minCount, topN }))
   } else if (cmd === 'download') {
     const outdir = positional[1] || 'public/images'
     await mkdir(outdir, { recursive: true })
@@ -868,7 +1032,7 @@ try {
       }
     }
     await Promise.all(Array.from({ length: DOWNLOAD_CONCURRENCY }, worker))
-    console.log(JSON.stringify({
+    await emit({
       outdir,
       total: list.length,
       downloaded: manifest.filter((m) => m.ok).length,
@@ -876,7 +1040,7 @@ try {
       failed: manifest.filter((m) => m.ok === false).length,
       limits: { maxAssetBytes: MAX_ASSET_BYTES, maxDataUriBytes: MAX_DATA_URI_BYTES, concurrency: DOWNLOAD_CONCURRENCY },
       manifest,
-    }, null, 2))
+    })
   }
 } catch (e) {
   console.error(JSON.stringify({ error: String((e && e.message) || e) }))
